@@ -1,0 +1,6 @@
+{
+  "name": "CLIMATOLOGIA",
+  "description": "Aplicativo completo de climatologia com meteorologia avançada, mapas interativos de vento e chuva, escala Beaufort, suporte GPS e assistente inteligente Gemini AI.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,39 @@
+{
+  "collections": {
+    "favorites": {
+      "description": "Lista de cidades favoritas salvas em nuvem para sincronização em tempo real",
+      "fields": {
+        "name": "string",
+        "latitude": "number",
+        "longitude": "number",
+        "state": "string",
+        "country": "string",
+        "createdAt": "timestamp"
+      }
+    },
+    "sms_registrations": {
+      "description": "Registros de alertas de SMS de Defesa Civil salvos em nuvem",
+      "fields": {
+        "zipcode": "string",
+        "createdAt": "timestamp"
+      }
+    },
+    "settings": {
+      "description": "Configurações e cidade ativa sincronizadas em tempo real entre dispositivos",
+      "fields": {
+        "isDark": "boolean",
+        "activeLocation": "object",
+        "updatedAt": "timestamp"
+      }
+    },
+    "weather_notes": {
+      "description": "Anotações e observações meteorológicas registradas pelos usuários",
+      "fields": {
+        "title": "string",
+        "content": "string",
+        "locationName": "string",
+        "createdAt": "timestamp"
+      }
+    }
+  }
+}
