@@ -36,6 +36,77 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
 });
 
+// Weather Caching Proxy to bypass browser iframe CORS restrictions & shared IP rate-limiting
+const weatherCache = new Map<string, { data: any; timestamp: number }>();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes cache
+
+app.get("/api/weather", async (req, res) => {
+  const { latitude, longitude } = req.query;
+  if (!latitude || !longitude) {
+    return res.status(400).json({ error: "Parâmetros latitude e longitude são obrigatórios." });
+  }
+
+  const lat = parseFloat(latitude as string);
+  const lon = parseFloat(longitude as string);
+  
+  if (isNaN(lat) || isNaN(lon)) {
+    return res.status(400).json({ error: "Latitude e longitude devem ser números válidos." });
+  }
+
+  const cacheKey = `${lat.toFixed(3)}_${lon.toFixed(3)}`;
+  const cached = weatherCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    console.log(`[Cache Hit] Serving weather for ${cacheKey}`);
+    return res.json(cached.data);
+  }
+
+  const base = "https://api.open-meteo.com/v1/forecast";
+  const params = `?latitude=${lat}&longitude=${lon}` +
+    `&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl,precipitation,rain,showers` +
+    `&hourly=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl,precipitation_probability,precipitation` +
+    `&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,weather_code,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_direction_10m_dominant,wind_gusts_10m_max` +
+    `&timezone=auto&forecast_days=16`;
+
+  const targetUrl = base + params;
+
+  try {
+    console.log(`[Proxy Fetch] Requesting weather from Open-Meteo for ${cacheKey}`);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+    const response = await fetch(targetUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json"
+      },
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      throw new Error(`Open-Meteo API returned status ${response.status}`);
+    }
+
+    const data = await response.json();
+    weatherCache.set(cacheKey, { data, timestamp: Date.now() });
+    return res.json(data);
+  } catch (err: any) {
+    console.error(`[Proxy Error] Failed to fetch weather for ${cacheKey}:`, err.message || err);
+    
+    // Serve stale cache if available, even if TTL expired
+    if (cached) {
+      console.log(`[Cache Fallback] Serving stale cache for ${cacheKey}`);
+      return res.json(cached.data);
+    }
+    
+    return res.status(502).json({
+      error: "Não foi possível obter dados de meteorologia em tempo real.",
+      details: err.message || "Erro de conexão com a API Open-Meteo"
+    });
+  }
+});
+
 // Weather analysis API utilizing Gemini 3.6-flash
 app.post("/api/gemini/analyze", async (req, res) => {
   try {

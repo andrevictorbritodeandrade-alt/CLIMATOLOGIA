@@ -21,6 +21,18 @@ import {
   CloudRain,
   ArrowUp,
   ArrowDown,
+  ChevronDown,
+  ChevronUp,
+  ShieldAlert,
+  Smartphone,
+  Download,
+  X,
+  Share2,
+  Clock,
+  Calendar,
+  Waves,
+  Bot,
+  BookOpen,
 } from "lucide-react";
 import { FavoriteCity, WeatherData } from "./types";
 import { 
@@ -107,6 +119,46 @@ export default function App() {
   const [noteTitle, setNoteTitle] = useState("");
   const [noteContent, setNoteContent] = useState("");
   const [isSubmittingNote, setIsSubmittingNote] = useState(false);
+
+  // Collapsible Panel States (Default collapsed / recolhidos as requested)
+  const [isCivilDefenseExpanded, setIsCivilDefenseExpanded] = useState(false);
+  const [isCityImpactsExpanded, setIsCityImpactsExpanded] = useState(false);
+  const [isTimelineExpanded, setIsTimelineExpanded] = useState(false);
+  const [isForecastListExpanded, setIsForecastListExpanded] = useState(false);
+  const [isWindChartExpanded, setIsWindChartExpanded] = useState(false);
+  const [isBeaufortExpanded, setIsBeaufortExpanded] = useState(false);
+  const [isBeachSeaExpanded, setIsBeachSeaExpanded] = useState(false);
+  const [isGeminiAssistantExpanded, setIsGeminiAssistantExpanded] = useState(false);
+  const [isCivilDefenseChannelsExpanded, setIsCivilDefenseChannelsExpanded] = useState(false);
+  const [isWeatherNotesExpanded, setIsWeatherNotesExpanded] = useState(false);
+
+  // PWA Standalone & Install Prompt States
+  const [pwaInstallPrompt, setPwaInstallPrompt] = useState<any>(null);
+  const [showPwaModal, setShowPwaModal] = useState(false);
+  const [isPwaInstalled, setIsPwaInstalled] = useState(false);
+
+  useEffect(() => {
+    // Check if running as native standalone PWA
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone;
+    if (isStandalone) {
+      setIsPwaInstalled(true);
+    }
+
+    const handleBeforeInstall = (e: Event) => {
+      e.preventDefault();
+      setPwaInstallPrompt(e);
+    };
+
+    window.addEventListener("beforeinstallprompt", handleBeforeInstall);
+    window.addEventListener("appinstalled", () => {
+      setIsPwaInstalled(true);
+      setPwaInstallPrompt(null);
+    });
+
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstall);
+    };
+  }, []);
 
   // Ativar Inscrições em Tempo Real do Firebase Cloud
   useEffect(() => {
@@ -265,14 +317,7 @@ export default function App() {
     const timeoutId = setTimeout(() => controller.abort(), 10000);
 
     try {
-      const base = "https://api.open-meteo.com/v1/forecast";
-      const params = `?latitude=${lat}&longitude=${lon}` +
-        `&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl,rain,visibility` +
-        `&hourly=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl,precipitation_probability,precipitation` +
-        `&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,weather_code,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_direction_10m_dominant,wind_gusts_10m_max` +
-        `&timezone=auto&forecast_days=16`;
-
-      const response = await fetch(base + params, { signal: controller.signal });
+      const response = await fetch(`/api/weather?latitude=${lat}&longitude=${lon}`, { signal: controller.signal });
       clearTimeout(timeoutId);
 
       if (!response.ok) {
@@ -282,22 +327,89 @@ export default function App() {
       const data = await response.json();
 
       if (data && data.current && data.daily && data.hourly) {
-        // Map current
+        // Map hourly 384 items first for hour-by-hour matching
+        const hourlyMapped = data.hourly.time.map((time: string, i: number) => ({
+          time: new Date(time),
+          temp: data.hourly.temperature_2m[i],
+          humidity: data.hourly.relative_humidity_2m[i],
+          feels: data.hourly.apparent_temperature[i],
+          wind_speed: data.hourly.wind_speed_10m[i],
+          wind_deg: data.hourly.wind_direction_10m[i],
+          wind_gust: data.hourly.wind_gusts_10m[i],
+          pressure: data.hourly.pressure_msl[i],
+          precip_prob: data.hourly.precipitation_probability[i] || 0,
+          precip: data.hourly.precipitation[i] || 0,
+          weatherCode: data.hourly.weather_code[i],
+        }));
+
+        // Find current hour in hourlyMapped
+        const now = new Date();
+        const currentHourIdx = hourlyMapped.findIndex(
+          (h: any) =>
+            h.time.getDate() === now.getDate() &&
+            h.time.getHours() === now.getHours()
+        );
+        const currentHourData = currentHourIdx !== -1 ? hourlyMapped[currentHourIdx] : null;
+
+        // Determine effective current weather code & rain
+        let rawCode = data.current.weather_code;
+        let rainAmt = (data.current.precipitation ?? data.current.rain ?? data.current.drizzle ?? 0);
+        if (rainAmt === 0 && currentHourData) {
+          rainAmt = currentHourData.precip;
+        }
+
+        let effectiveCode = rawCode;
+        let precipProb = currentHourData ? currentHourData.precip_prob : 0;
+
+        // If raw code is overcast/cloudy (0, 1, 2, 3), but current hour precipitation > 0 or precipitation probability >= 20% or hourly weather code is rain/drizzle
+        if (currentHourData && (currentHourData.weatherCode >= 50 && currentHourData.weatherCode <= 85)) {
+          effectiveCode = currentHourData.weatherCode;
+        } else if ((rawCode <= 3) && (rainAmt > 0 || precipProb >= 20)) {
+          // Upgrade code to 51 (Garoa Leve / Chuva Leve)
+          effectiveCode = 51;
+        }
+
+        // Compute local today's max/min from today's hourly records
+        const todayHourly = hourlyMapped.filter((h: any) => h.time.getDate() === now.getDate());
+        let localTempMax = data.daily.temperature_2m_max[0];
+        let localTempMin = data.daily.temperature_2m_min[0];
+
+        if (todayHourly.length > 0) {
+          const maxHourlyTemp = Math.max(...todayHourly.map((h: any) => h.temp));
+          const minHourlyTemp = Math.min(...todayHourly.map((h: any) => h.temp));
+          const currentTemp = data.current.temperature_2m;
+          
+          // Filter out raw daily max outliers if they exceed current temp + 5°C on a overcast/drizzle day
+          if (localTempMax > currentTemp + 5 && (effectiveCode === 2 || effectiveCode === 3 || effectiveCode >= 50)) {
+            localTempMax = Math.max(maxHourlyTemp, currentTemp);
+          } else {
+            localTempMax = Math.min(localTempMax, Math.max(maxHourlyTemp, currentTemp));
+          }
+          localTempMin = Math.min(localTempMin, minHourlyTemp);
+        }
+
+        // Bound feels_like to realistic limits
+        let currentFeels = data.current.apparent_temperature;
+        if (effectiveCode >= 50 && currentFeels > data.current.temperature_2m + 2) {
+          currentFeels = data.current.temperature_2m + 1;
+        }
+
+        // Map current with high precision
         const currentMapped = {
           temp: data.current.temperature_2m,
-          feels_like: data.current.apparent_temperature,
+          feels_like: currentFeels,
           humidity: data.current.relative_humidity_2m,
           pressure: data.current.pressure_msl,
-          temp_max: data.daily.temperature_2m_max[0],
-          temp_min: data.daily.temperature_2m_min[0],
+          temp_max: localTempMax,
+          temp_min: localTempMin,
           windSpeed: data.current.wind_speed_10m,
           windGust: data.current.wind_gusts_10m,
           windDir: getWindDirectionCode(data.current.wind_direction_10m),
           windDeg: data.current.wind_direction_10m,
-          rain1h: data.current.rain || 0,
+          rain1h: rainAmt,
           visibility: data.current.visibility || 10000,
-          weatherCode: data.current.weather_code,
-          description: getWeatherDescription(data.current.weather_code),
+          weatherCode: effectiveCode,
+          description: getWeatherDescription(effectiveCode),
         };
 
         // Map daily 16 days
@@ -312,21 +424,6 @@ export default function App() {
           pop: data.daily.precipitation_probability_max[i] || 0,
           weatherCode: data.daily.weather_code[i],
           main_desc: getWeatherDescription(data.daily.weather_code[i]),
-        }));
-
-        // Map hourly 384 items
-        const hourlyMapped = data.hourly.time.map((time: string, i: number) => ({
-          time: new Date(time),
-          temp: data.hourly.temperature_2m[i],
-          humidity: data.hourly.relative_humidity_2m[i],
-          feels: data.hourly.apparent_temperature[i],
-          wind_speed: data.hourly.wind_speed_10m[i],
-          wind_deg: data.hourly.wind_direction_10m[i],
-          wind_gust: data.hourly.wind_gusts_10m[i],
-          pressure: data.hourly.pressure_msl[i],
-          precip_prob: data.hourly.precipitation_probability[i] || 0,
-          precip: data.hourly.precipitation[i] || 0,
-          weatherCode: data.hourly.weather_code[i],
         }));
 
         const fetchedWeatherData: WeatherData = {
@@ -423,10 +520,10 @@ export default function App() {
       3: "Encoberto",
       45: "Nevoeiro",
       48: "Nevoeiro Gelado",
-      51: "Garoa Leve",
+      51: "Garoa / Chuva Leve",
       53: "Garoa Moderada",
       55: "Garoa Densa",
-      61: "Chuva Fraca",
+      61: "Chuva Leve",
       63: "Chuva Moderada",
       65: "Chuva Forte",
       71: "Neve Fraca",
@@ -789,7 +886,7 @@ export default function App() {
       />
 
       {/* Container main wrapper */}
-      <div className="relative z-10 max-w-7xl mx-auto px-4 py-4 md:py-6 space-y-6">
+      <div className="relative z-10 max-w-7xl mx-auto px-3 sm:px-4 py-3 sm:py-6 space-y-4 sm:space-y-6">
         
         {/* UPPER NAVIGATION BAR: Search, Geolocation, Theme selector */}
         <header className="flex flex-col lg:flex-row gap-4 justify-between items-start lg:items-center">
@@ -911,6 +1008,34 @@ export default function App() {
 
             {/* Controls button block */}
             <div className="flex gap-2 shrink-0">
+              {/* PWA Install app button */}
+              <button
+                onClick={() => {
+                  if (pwaInstallPrompt) {
+                    pwaInstallPrompt.prompt();
+                    pwaInstallPrompt.userChoice.then((choiceResult: any) => {
+                      if (choiceResult && choiceResult.outcome === "accepted") {
+                        setIsPwaInstalled(true);
+                      }
+                      setPwaInstallPrompt(null);
+                    });
+                  } else {
+                    setShowPwaModal(true);
+                  }
+                }}
+                className={`px-3 py-2 rounded-full border shadow-sm transition-all flex items-center gap-1.5 text-xs font-black select-none ${
+                  isPwaInstalled
+                    ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-500"
+                    : "bg-[#E2725B] border-[#c85a43] text-white hover:bg-[#d0614b] animate-pulse"
+                }`}
+                title="Adicionar Climavento à Tela Inicial do Celular"
+              >
+                <Smartphone className="w-4 h-4 shrink-0" />
+                <span className="hidden sm:inline">
+                  {isPwaInstalled ? "App Instalado" : "Instalar no Celular"}
+                </span>
+              </button>
+
               {/* GPS Geolocation dial */}
               <button
                 onClick={triggerGPSGeolocation}
@@ -1012,7 +1137,7 @@ export default function App() {
 
         {/* CLIMATE HEADER CONTAINER (Landmark Banner & Quick details) */}
         <section
-          className="relative rounded-[32px] overflow-hidden min-h-[180px] md:min-h-[220px] flex items-end p-6 md:p-8 shadow-md border"
+          className="relative rounded-[24px] sm:rounded-[32px] overflow-hidden min-h-[160px] sm:min-h-[180px] md:min-h-[220px] flex items-end p-4 sm:p-6 md:p-8 shadow-md border"
           style={{ borderColor: isDark ? "#27272a" : "#E7E1D1" }}
         >
           {/* Image backplate with absolute scrim shadow */}
@@ -1025,36 +1150,36 @@ export default function App() {
           <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent" />
 
           {/* Banner content */}
-          <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-end w-full gap-4 text-white">
-            <div className="space-y-1">
-              <span className="text-[10px] uppercase font-black bg-[#E2725B] text-white px-2.5 py-1 rounded-md tracking-widest shadow-sm select-none">
+          <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-end w-full gap-3 sm:gap-4 text-white">
+            <div className="space-y-1 w-full md:w-auto">
+              <span className="text-[10px] uppercase font-black bg-[#E2725B] text-white px-2.5 py-1 rounded-md tracking-widest shadow-sm select-none inline-block">
                 Monitoramento Ativo
               </span>
-              <h2 className="text-3xl md:text-4xl font-black tracking-tight drop-shadow-md flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse inline-block" />
-                {location.name}
+              <h2 className="text-2xl sm:text-3xl md:text-4xl font-black tracking-tight drop-shadow-md flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse inline-block shrink-0" />
+                <span className="truncate">{location.name}</span>
               </h2>
-              <p className="text-xs font-semibold opacity-90 leading-none">
+              <p className="text-[11px] sm:text-xs font-semibold opacity-90 leading-tight">
                 {location.state ? `${location.state}, ` : ""}
                 {location.country || "Brasil"} · GPS: {location.latitude.toFixed(4)}, {location.longitude.toFixed(4)}
               </p>
-              <p className="text-[9px] text-white/60 italic leading-none pt-0.5">Imagem: {banner.credit}</p>
+              <p className="text-[9px] text-white/60 italic leading-none pt-0.5 truncate">Imagem: {banner.credit}</p>
             </div>
 
             {/* Quick Metrics */}
-            <div className="flex gap-4 shrink-0 bg-black/40 backdrop-blur-md px-4 py-3 rounded-2xl border border-white/10 shadow-lg">
-              <div className="text-center pr-4 border-r border-white/15">
-                <span className="block text-[10px] text-white/70 font-bold uppercase tracking-wider">Última Att</span>
-                <span className="text-sm font-black text-[#EAB308]">
+            <div className="flex gap-3 sm:gap-4 shrink-0 bg-black/40 backdrop-blur-md px-3 sm:px-4 py-2.5 sm:py-3 rounded-2xl border border-white/10 shadow-lg w-full md:w-auto justify-between md:justify-start">
+              <div className="text-center pr-3 sm:pr-4 border-r border-white/15 flex-1 md:flex-none">
+                <span className="block text-[9px] sm:text-[10px] text-white/70 font-bold uppercase tracking-wider">Última Att</span>
+                <span className="text-xs sm:text-sm font-black text-[#EAB308]">
                   {lastUpdated ? `🔄 ${lastUpdated}` : "Sincronizando"}
                 </span>
-                <span className="block text-[9px] text-white/50 leading-none mt-0.5">A cada 30 min</span>
+                <span className="block text-[8px] sm:text-[9px] text-white/50 leading-none mt-0.5">A cada 30 min</span>
               </div>
               {weather && (
-                <div className="text-center">
-                  <span className="block text-[10px] text-white/70 font-bold uppercase tracking-wider">Pressão Atmosférica</span>
-                  <span className="text-sm font-black text-white">{weather.current.pressure} hPa</span>
-                  <span className={`block text-[9px] font-bold mt-0.5 ${getPressureLabel(weather.current.pressure).colorClass}`}>
+                <div className="text-center flex-1 md:flex-none">
+                  <span className="block text-[9px] sm:text-[10px] text-white/70 font-bold uppercase tracking-wider">Pressão Atmosférica</span>
+                  <span className="text-xs sm:text-sm font-black text-white">{weather.current.pressure} hPa</span>
+                  <span className={`block text-[8px] sm:text-[9px] font-bold mt-0.5 ${getPressureLabel(weather.current.pressure).colorClass}`}>
                     {getPressureLabel(weather.current.pressure).text}
                   </span>
                 </div>
@@ -1062,6 +1187,254 @@ export default function App() {
             </div>
           </div>
         </section>
+
+        {/* CARD 2: CLIMA ATUAL, LINHA DO TEMPO DIÁRIA E PREVISÃO DIÁRIA */}
+        {weather && (
+          <div className="space-y-6">
+            <div
+              className={`relative overflow-hidden rounded-[32px] p-6 border transition-all duration-300 shadow-sm grid grid-cols-1 md:grid-cols-3 gap-6 ${
+                isDark ? "bg-[#111111] border-zinc-800" : "bg-white border-[#E7E1D1]"
+              }`}
+            >
+              {/* Dynamic Ultra-realistic Weather Background with blur & fade */}
+              <div className="absolute inset-0 pointer-events-none z-0">
+                <img
+                  src={getWeatherBgImage(weather.current.weatherCode, new Date())}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  className="absolute inset-0 w-full h-full object-cover opacity-35 dark:opacity-20 transition-all duration-700 scale-105"
+                />
+                {/* Frosted glass/blur layer - blends into card for ultra-premium aesthetic */}
+                <div className="absolute inset-0 backdrop-blur-[10px] bg-white/10 dark:bg-black/20" />
+                
+                {/* Advanced Multi-directional fade so image softens seamlessly at the card's boundaries */}
+                <div className="absolute inset-0 bg-gradient-to-t from-white via-white/75 to-transparent dark:from-[#111111] dark:via-[#111111]/70" />
+                <div className="absolute inset-0 bg-gradient-to-b from-transparent via-white/10 to-white/40 dark:via-[#111111]/10 dark:to-[#111111]/40" />
+              </div>
+
+              {/* Highlight Big Temp */}
+              <div className="relative z-10 md:col-span-1 flex flex-col justify-between border-b md:border-b-0 md:border-r border-[#E7E1D1]/40 dark:border-zinc-800 pb-4 md:pb-0 pr-0 md:pr-4">
+                <div>
+                  <span className="text-xs text-zinc-500 dark:text-zinc-400 font-black uppercase tracking-wider">Clima Atual</span>
+                  <span className="block text-[11px] font-black text-[#E2725B] mt-1">
+                    {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).replace(/^\w/, (c) => c.toUpperCase())}
+                  </span>
+                  <div className="flex items-start mt-2">
+                    <span className="text-6xl md:text-7xl font-black text-[#1F1B16] dark:text-white leading-none">
+                      {Math.round(weather.current.temp)}°
+                    </span>
+                    <span className="text-2xl font-black text-[#E2725B] mt-1">C</span>
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <span className="text-sm font-black text-[#E2725B] capitalize block leading-tight">
+                    {weather.current.description}
+                  </span>
+                  <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 block mt-1">
+                    Sensação Térmica: {Math.round(weather.current.feels_like)}°C
+                  </span>
+                </div>
+              </div>
+
+              {/* Submetrics Grid */}
+              <div className="relative z-10 md:col-span-2 grid grid-cols-2 sm:grid-cols-3 gap-4">
+                {/* Máx / Mín */}
+                <div className="p-3.5 rounded-[20px] bg-rose-500/5 dark:bg-rose-500/10 border border-rose-500/15 dark:border-rose-500/20 leading-tight transition-all hover:scale-[1.02] flex flex-col justify-between">
+                  <div className="flex items-center gap-1.5 mb-1 text-rose-700 dark:text-rose-400">
+                    <Thermometer className="w-4 h-4 text-rose-500 shrink-0" />
+                    <span className="block text-[10px] font-black uppercase tracking-wider">Máx / Mín</span>
+                  </div>
+                  <div className="flex flex-col gap-1 mt-1 font-extrabold">
+                    <span className="text-sm font-black text-red-500 flex items-center gap-1">
+                      <ArrowUp className="w-4 h-4 text-red-500 shrink-0" /> {Math.round(weather.current.temp_max)}°C
+                    </span>
+                    <span className="text-sm font-black text-blue-500 flex items-center gap-1">
+                      <ArrowDown className="w-4 h-4 text-blue-500 shrink-0" /> {Math.round(weather.current.temp_min)}°C
+                    </span>
+                  </div>
+                </div>
+
+                {/* Umidade */}
+                <div className="p-3.5 rounded-[20px] bg-sky-500/5 dark:bg-sky-500/10 border border-sky-500/15 dark:border-sky-500/20 leading-tight transition-all hover:scale-[1.02] flex flex-col justify-between">
+                  <div className="flex items-center gap-1.5 mb-1 text-sky-700 dark:text-sky-400">
+                    <Droplets className="w-4 h-4 text-sky-500 shrink-0" />
+                    <span className="block text-[10px] font-black uppercase tracking-wider">Umidade</span>
+                  </div>
+                  <div className="mt-1">
+                    <span className="text-xl font-extrabold text-sky-600 dark:text-sky-300">
+                      {weather.current.humidity}%
+                    </span>
+                    <span className="block text-[9px] text-zinc-500 dark:text-zinc-400 mt-0.5 leading-none">
+                      Umidade do ar
+                    </span>
+                  </div>
+                </div>
+
+                {/* Visibilidade */}
+                <div className="p-3.5 rounded-[20px] bg-indigo-500/5 dark:bg-indigo-500/10 border border-indigo-500/15 dark:border-indigo-500/20 leading-tight transition-all hover:scale-[1.02] flex flex-col justify-between">
+                  <div className="flex items-center gap-1.5 mb-1 text-indigo-700 dark:text-indigo-400">
+                    <Eye className="w-4 h-4 text-indigo-500 shrink-0" />
+                    <span className="block text-[10px] font-black uppercase tracking-wider">Visibilidade</span>
+                  </div>
+                  <div className="mt-1">
+                    <span className="text-xl font-extrabold text-indigo-600 dark:text-indigo-300">
+                      {(weather.current.visibility / 1000).toFixed(1)} km
+                    </span>
+                    <span className="block text-[9px] text-zinc-500 dark:text-zinc-400 mt-0.5 leading-none">
+                      Alcance visual
+                    </span>
+                  </div>
+                </div>
+
+                {/* Vento Médio */}
+                <div className="p-3.5 rounded-[20px] bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/15 dark:border-emerald-500/20 leading-tight transition-all hover:scale-[1.02] flex flex-col justify-between">
+                  <div className="flex items-center gap-1.5 mb-1 text-emerald-700 dark:text-emerald-400">
+                    <Wind className="w-4 h-4 text-emerald-500 shrink-0" />
+                    <span className="block text-[10px] font-black uppercase tracking-wider">Vento Médio</span>
+                  </div>
+                  <div className="mt-1">
+                    <span className="text-xl font-extrabold text-emerald-600 dark:text-emerald-400">
+                      {weather.current.windSpeed.toFixed(1)} km/h
+                    </span>
+                    <span className="block text-[9px] font-bold text-[#7E7667] dark:text-zinc-400 mt-0.5 leading-normal">
+                      {getFullWindDirectionText(weather.current.windDeg)} ({weather.current.windDeg}°)
+                    </span>
+                  </div>
+                </div>
+
+                {/* Rajada Máxima */}
+                <div className="p-3.5 rounded-[20px] bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/15 dark:border-amber-500/20 leading-tight transition-all hover:scale-[1.02] flex flex-col justify-between">
+                  <div className="flex items-center gap-1.5 mb-1 text-amber-700 dark:text-amber-400">
+                    <Zap className="w-4 h-4 text-amber-500 shrink-0" />
+                    <span className="block text-[10px] font-black uppercase tracking-wider">Rajada Máx</span>
+                  </div>
+                  <div className="mt-1">
+                    <span className="text-xl font-extrabold text-amber-600 dark:text-amber-300">
+                      {weather.current.windGust.toFixed(1)} km/h
+                    </span>
+                    <span className="block text-[9px] font-black text-amber-600 dark:text-amber-400 bg-amber-500/10 dark:bg-amber-500/20 px-1.5 py-0.5 rounded-md mt-1 w-fit leading-none">
+                      {getBeaufortClassification(weather.current.windGust)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Chuva Hoje */}
+                <div className="p-3.5 rounded-[20px] bg-blue-500/5 dark:bg-blue-500/10 border border-blue-500/15 dark:border-blue-500/20 leading-tight transition-all hover:scale-[1.02] flex flex-col justify-between">
+                  <div className="flex items-center gap-1.5 mb-1 text-blue-700 dark:text-blue-400">
+                    <CloudRain className="w-4 h-4 text-blue-500 shrink-0" />
+                    <span className="block text-[10px] font-black uppercase tracking-wider">Chuva Hoje</span>
+                  </div>
+                  <div className="mt-1">
+                    <span className="text-xl font-extrabold text-blue-600 dark:text-blue-300">
+                      {(weather.daily[0]?.rain_mm || 0).toFixed(1)} mm
+                    </span>
+                    <span className="block text-[9px] text-zinc-500 dark:text-zinc-400 mt-0.5 leading-none">
+                      Precipitação esperada
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* SLIDER HOUR TIMELINE CARD (COLLAPSIBLE) */}
+            <div
+              className={`rounded-[24px] sm:rounded-[32px] border transition-all duration-300 shadow-sm overflow-hidden ${
+                isDark ? "bg-[#111111] border-zinc-800" : "bg-white border-[#E7E1D1]"
+              }`}
+            >
+              <button
+                onClick={() => setIsTimelineExpanded((prev) => !prev)}
+                className="w-full p-5 sm:p-6 flex items-center justify-between gap-3 text-left hover:opacity-90 transition-all select-none cursor-pointer"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="p-2.5 rounded-2xl bg-sky-500/10 text-sky-500 border border-sky-500/20 shrink-0">
+                    <Clock className="w-5 h-5" />
+                  </div>
+                  <div className="truncate">
+                    <h3 className="font-black text-sm sm:text-base text-[#1F1B16] dark:text-white truncate">
+                      Linha do Tempo Diária (Hora em Hora)
+                    </h3>
+                    <p className="text-[11px] sm:text-xs text-zinc-500 dark:text-zinc-400 font-medium truncate mt-0.5">
+                      Variação horária de temperatura, vento e chuva para o dia selecionado
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-sky-600 dark:text-sky-400 bg-sky-500/10 px-2.5 py-1 rounded-md hidden md:inline-block">
+                    {isTimelineExpanded ? "Expandido" : "Recolhido"}
+                  </span>
+                  {isTimelineExpanded ? (
+                    <ChevronUp className="w-5 h-5 text-zinc-400" />
+                  ) : (
+                    <ChevronDown className="w-5 h-5 text-zinc-400" />
+                  )}
+                </div>
+              </button>
+
+              {isTimelineExpanded && (
+                <div className="p-5 sm:p-6 pt-0 border-t border-zinc-200/50 dark:border-zinc-800/80 transition-all">
+                  <ForecastTimeline
+                    hourly={weather.hourly}
+                    activeDayIndex={activeDayIndex}
+                    setActiveDayIndex={setActiveDayIndex}
+                    activeHourIndex={activeHourIndex}
+                    setActiveHourIndex={setActiveHourIndex}
+                    isDark={isDark}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* 16 DAYS HORIZONTAL LIST (COLLAPSIBLE) */}
+            <div
+              className={`rounded-[24px] sm:rounded-[32px] border transition-all duration-300 shadow-sm overflow-hidden ${
+                isDark ? "bg-[#111111] border-zinc-800" : "bg-white border-[#E7E1D1]"
+              }`}
+            >
+              <button
+                onClick={() => setIsForecastListExpanded((prev) => !prev)}
+                className="w-full p-5 sm:p-6 flex items-center justify-between gap-3 text-left hover:opacity-90 transition-all select-none cursor-pointer"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="p-2.5 rounded-2xl bg-[#E2725B]/10 text-[#E2725B] border border-[#E2725B]/20 shrink-0">
+                    <Calendar className="w-5 h-5" />
+                  </div>
+                  <div className="truncate">
+                    <h3 className="font-black text-sm sm:text-base text-[#1F1B16] dark:text-white truncate">
+                      Previsão para 16 Dias (Calendário Ampliado)
+                    </h3>
+                    <p className="text-[11px] sm:text-xs text-zinc-500 dark:text-zinc-400 font-medium truncate mt-0.5">
+                      Tendência de temperatura, probabilidade de chuva e máxima de rajadas de vento
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-[#E2725B] bg-[#E2725B]/10 px-2.5 py-1 rounded-md hidden md:inline-block">
+                    {isForecastListExpanded ? "Expandido" : "Recolhido"}
+                  </span>
+                  {isForecastListExpanded ? (
+                    <ChevronUp className="w-5 h-5 text-zinc-400" />
+                  ) : (
+                    <ChevronDown className="w-5 h-5 text-zinc-400" />
+                  )}
+                </div>
+              </button>
+
+              {isForecastListExpanded && (
+                <div className="p-5 sm:p-6 pt-0 border-t border-zinc-200/50 dark:border-zinc-800/80 transition-all">
+                  <ForecastList
+                    days={weather.daily}
+                    activeDayIndex={activeDayIndex}
+                    setActiveDayIndex={setActiveDayIndex}
+                    isDark={isDark}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* CONNECTION / CACHE ALERT BANNER */}
         {weatherError && (
@@ -1092,177 +1465,124 @@ export default function App() {
           </div>
         )}
 
-        {/* CIVIL DEFENSE OFFICIAL EMERGENCY ALERT BANNER */}
-        <CivilDefenseAlertBanner
-          cityName={location.name}
-          isDark={isDark}
-          currentWindSpeed={weather ? weather.current.windSpeed : 28}
-          currentWindGust={weather ? weather.current.windGust : 72}
-          onTriggerGPS={triggerGPSGeolocation}
-          isGPSActive={isGPSActive}
-          isGPSLoading={isGPSLoading}
-        />
+        {/* CIVIL DEFENSE OFFICIAL EMERGENCY ALERT BANNER (COLLAPSIBLE) */}
+        <div
+          className={`rounded-2xl border transition-all duration-300 shadow-sm overflow-hidden ${
+            isDark ? "bg-[#111111] border-zinc-800" : "bg-white border-[#E7E1D1]"
+          }`}
+        >
+          <button
+            onClick={() => setIsCivilDefenseExpanded((prev) => !prev)}
+            className="w-full p-3.5 sm:p-4 flex items-center justify-between gap-3 text-left hover:opacity-90 transition-all select-none cursor-pointer"
+          >
+            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <div className="p-2 rounded-xl bg-red-500/15 text-red-500 border border-red-500/30 shrink-0">
+                <ShieldAlert className="w-4 h-4 sm:w-5 sm:h-5" />
+              </div>
+              <div className="truncate">
+                <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                  <h3 className="font-black text-xs sm:text-sm text-[#1F1B16] dark:text-white truncate">
+                    Alerta Oficial da Defesa Civil & Estágios Operacionais
+                  </h3>
+                  <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black uppercase bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shrink-0">
+                    Estágio 1 · Normalidade
+                  </span>
+                </div>
+                <p className="text-[11px] sm:text-xs text-zinc-500 dark:text-zinc-400 font-medium truncate mt-0.5">
+                  Radar meteorológico Alerta Rio, GPS e mapa de radares
+                </p>
+              </div>
+            </div>
 
-        {/* CITY IMPACT & RISK PREDICTION PANEL (QUEDA DE ENERGIA, ÁRVORES, DESTELHAMENTO, RESSACA) */}
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-xl border border-amber-500/20 hidden md:inline-block">
+                {isCivilDefenseExpanded ? "Recolher Painel" : "Ver Alertas (Expandir)"}
+              </span>
+              {isCivilDefenseExpanded ? (
+                <ChevronUp className="w-5 h-5 text-zinc-400" />
+              ) : (
+                <ChevronDown className="w-5 h-5 text-zinc-400" />
+              )}
+            </div>
+          </button>
+
+          {isCivilDefenseExpanded && (
+            <div className="p-3.5 sm:p-4 pt-0 border-t border-zinc-200/50 dark:border-zinc-800/80 transition-all">
+              <CivilDefenseAlertBanner
+                cityName={location.name}
+                isDark={isDark}
+                currentWindSpeed={weather ? weather.current.windSpeed : 28}
+                currentWindGust={weather ? weather.current.windGust : 72}
+                onTriggerGPS={triggerGPSGeolocation}
+                isGPSActive={isGPSActive}
+                isGPSLoading={isGPSLoading}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* CITY IMPACT & RISK PREDICTION PANEL (COLLAPSIBLE) */}
         {weather && (
-          <CityImpactPanel
-            windSpeed={weather.current.windSpeed}
-            windGust={weather.current.windGust}
-            rainSum={weather.daily[0]?.rain_mm || 0}
-            cityName={location.name}
-            isDark={isDark}
-          />
+          <div
+            className={`rounded-2xl border transition-all duration-300 shadow-sm overflow-hidden ${
+              isDark ? "bg-[#111111] border-zinc-800" : "bg-white border-[#E7E1D1]"
+            }`}
+          >
+            <button
+              onClick={() => setIsCityImpactsExpanded((prev) => !prev)}
+              className="w-full p-3.5 sm:p-4 flex items-center justify-between gap-3 text-left hover:opacity-90 transition-all select-none cursor-pointer"
+            >
+              <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                <div className="p-2 rounded-xl bg-amber-500/15 text-amber-500 border border-amber-500/30 shrink-0">
+                  <Zap className="w-4 h-4 sm:w-5 sm:h-5" />
+                </div>
+                <div className="truncate">
+                  <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                    <h3 className="font-black text-xs sm:text-sm text-[#1F1B16] dark:text-white truncate">
+                      Previsão de Impactos Urbanos na Cidade
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black uppercase bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 shrink-0">
+                      4 Indicadores de Risco
+                    </span>
+                  </div>
+                  <p className="text-[11px] sm:text-xs text-zinc-500 dark:text-zinc-400 font-medium truncate mt-0.5">
+                    Risco Enel (Energia), Queda de Árvores, Destelhamento e Ressaca
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-xl border border-amber-500/20 hidden md:inline-block">
+                  {isCityImpactsExpanded ? "Recolher Painel" : "Ver Impactos (Expandir)"}
+                </span>
+                {isCityImpactsExpanded ? (
+                  <ChevronUp className="w-5 h-5 text-zinc-400" />
+                ) : (
+                  <ChevronDown className="w-5 h-5 text-zinc-400" />
+                )}
+              </div>
+            </button>
+
+            {isCityImpactsExpanded && (
+              <div className="p-3.5 sm:p-4 pt-0 border-t border-zinc-200/50 dark:border-zinc-800/80 transition-all">
+                <CityImpactPanel
+                  windSpeed={weather.current.windSpeed}
+                  windGust={weather.current.windGust}
+                  rainSum={weather.daily[0]?.rain_mm || 0}
+                  cityName={location.name}
+                  isDark={isDark}
+                />
+              </div>
+            )}
+          </div>
         )}
 
         {/* MAIN METEOROLOGICAL BLOCKS */}
         {weather && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
-            {/* LEFT/CENTER DOUBLE COLUMN: Current, Map, Beaufort, AI and Timeline */}
+            {/* LEFT/CENTER DOUBLE COLUMN: Map, Beaufort, AI and Timeline */}
             <div className="lg:col-span-2 space-y-6">
-              
-              {/* CURRENT WEATHER GRID CARD */}
-              <div
-                className={`relative overflow-hidden rounded-[32px] p-6 border transition-all duration-300 shadow-sm grid grid-cols-1 md:grid-cols-3 gap-6 ${
-                  isDark ? "bg-[#111111] border-zinc-800" : "bg-white border-[#E7E1D1]"
-                }`}
-              >
-                {/* Dynamic Ultra-realistic Weather Background with blur & fade */}
-                <div className="absolute inset-0 pointer-events-none z-0">
-                  <img
-                    src={getWeatherBgImage(weather.current.weatherCode, new Date())}
-                    alt=""
-                    referrerPolicy="no-referrer"
-                    className="absolute inset-0 w-full h-full object-cover opacity-35 dark:opacity-20 transition-all duration-700 scale-105"
-                  />
-                  {/* Frosted glass/blur layer - blends into card for ultra-premium aesthetic */}
-                  <div className="absolute inset-0 backdrop-blur-[10px] bg-white/10 dark:bg-black/20" />
-                  
-                  {/* Advanced Multi-directional fade so image softens seamlessly at the card's boundaries */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-white via-white/75 to-transparent dark:from-[#111111] dark:via-[#111111]/70" />
-                  <div className="absolute inset-0 bg-gradient-to-b from-transparent via-white/10 to-white/40 dark:via-[#111111]/10 dark:to-[#111111]/40" />
-                </div>
-
-                {/* Highlight Big Temp */}
-                <div className="relative z-10 md:col-span-1 flex flex-col justify-between border-b md:border-b-0 md:border-r border-[#E7E1D1]/40 dark:border-zinc-800 pb-4 md:pb-0 pr-0 md:pr-4">
-                  <div>
-                    <span className="text-xs text-zinc-500 dark:text-zinc-400 font-black uppercase tracking-wider">Clima Atual</span>
-                    <div className="flex items-start mt-2">
-                      <span className="text-6xl md:text-7xl font-black text-[#1F1B16] dark:text-white leading-none">
-                        {Math.round(weather.current.temp)}°
-                      </span>
-                      <span className="text-2xl font-black text-[#E2725B] mt-1">C</span>
-                    </div>
-                  </div>
-                  <div className="mt-4">
-                    <span className="text-sm font-black text-[#E2725B] capitalize block leading-tight">
-                      {weather.current.description}
-                    </span>
-                    <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 block mt-1">
-                      Sensação Térmica: {Math.round(weather.current.feels_like)}°C
-                    </span>
-                  </div>
-                </div>
-
-                {/* Submetrics Grid */}
-                <div className="relative z-10 md:col-span-2 grid grid-cols-2 sm:grid-cols-3 gap-4">
-                  {/* Máx / Mín */}
-                  <div className="p-3.5 rounded-[20px] bg-rose-500/5 dark:bg-rose-500/10 border border-rose-500/15 dark:border-rose-500/20 leading-tight transition-all hover:scale-[1.02] flex flex-col justify-between">
-                    <div className="flex items-center gap-1.5 mb-1 text-rose-700 dark:text-rose-400">
-                      <Thermometer className="w-4 h-4 text-rose-500 shrink-0" />
-                      <span className="block text-[10px] font-black uppercase tracking-wider">Máx / Mín</span>
-                    </div>
-                    <div className="flex flex-col gap-1 mt-1 font-extrabold">
-                      <span className="text-sm font-black text-red-500 flex items-center gap-1">
-                        <ArrowUp className="w-4 h-4 text-red-500 shrink-0" /> {Math.round(weather.current.temp_max)}°C
-                      </span>
-                      <span className="text-sm font-black text-blue-500 flex items-center gap-1">
-                        <ArrowDown className="w-4 h-4 text-blue-500 shrink-0" /> {Math.round(weather.current.temp_min)}°C
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Umidade */}
-                  <div className="p-3.5 rounded-[20px] bg-sky-500/5 dark:bg-sky-500/10 border border-sky-500/15 dark:border-sky-500/20 leading-tight transition-all hover:scale-[1.02] flex flex-col justify-between">
-                    <div className="flex items-center gap-1.5 mb-1 text-sky-700 dark:text-sky-400">
-                      <Droplets className="w-4 h-4 text-sky-500 shrink-0" />
-                      <span className="block text-[10px] font-black uppercase tracking-wider">Umidade</span>
-                    </div>
-                    <div className="mt-1">
-                      <span className="text-xl font-extrabold text-sky-600 dark:text-sky-300">
-                        {weather.current.humidity}%
-                      </span>
-                      <span className="block text-[9px] text-zinc-500 dark:text-zinc-400 mt-0.5 leading-none">
-                        Umidade do ar
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Visibilidade */}
-                  <div className="p-3.5 rounded-[20px] bg-indigo-500/5 dark:bg-indigo-500/10 border border-indigo-500/15 dark:border-indigo-500/20 leading-tight transition-all hover:scale-[1.02] flex flex-col justify-between">
-                    <div className="flex items-center gap-1.5 mb-1 text-indigo-700 dark:text-indigo-400">
-                      <Eye className="w-4 h-4 text-indigo-500 shrink-0" />
-                      <span className="block text-[10px] font-black uppercase tracking-wider">Visibilidade</span>
-                    </div>
-                    <div className="mt-1">
-                      <span className="text-xl font-extrabold text-indigo-600 dark:text-indigo-300">
-                        {(weather.current.visibility / 1000).toFixed(1)} km
-                      </span>
-                      <span className="block text-[9px] text-zinc-500 dark:text-zinc-400 mt-0.5 leading-none">
-                        Alcance visual
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Vento Médio */}
-                  <div className="p-3.5 rounded-[20px] bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/15 dark:border-emerald-500/20 leading-tight transition-all hover:scale-[1.02] flex flex-col justify-between">
-                    <div className="flex items-center gap-1.5 mb-1 text-emerald-700 dark:text-emerald-400">
-                      <Wind className="w-4 h-4 text-emerald-500 shrink-0" />
-                      <span className="block text-[10px] font-black uppercase tracking-wider">Vento Médio</span>
-                    </div>
-                    <div className="mt-1">
-                      <span className="text-xl font-extrabold text-emerald-600 dark:text-emerald-400">
-                        {weather.current.windSpeed.toFixed(1)} km/h
-                      </span>
-                      <span className="block text-[9px] font-bold text-[#7E7667] dark:text-zinc-400 mt-0.5 leading-normal">
-                        {getFullWindDirectionText(weather.current.windDeg)} ({weather.current.windDeg}°)
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Rajada Máxima */}
-                  <div className="p-3.5 rounded-[20px] bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/15 dark:border-amber-500/20 leading-tight transition-all hover:scale-[1.02] flex flex-col justify-between">
-                    <div className="flex items-center gap-1.5 mb-1 text-amber-700 dark:text-amber-400">
-                      <Zap className="w-4 h-4 text-amber-500 shrink-0" />
-                      <span className="block text-[10px] font-black uppercase tracking-wider">Rajada Máx</span>
-                    </div>
-                    <div className="mt-1">
-                      <span className="text-xl font-extrabold text-amber-600 dark:text-amber-300">
-                        {weather.current.windGust.toFixed(1)} km/h
-                      </span>
-                      <span className="block text-[9px] font-black text-amber-600 dark:text-amber-400 bg-amber-500/10 dark:bg-amber-500/20 px-1.5 py-0.5 rounded-md mt-1 w-fit leading-none">
-                        {getBeaufortClassification(weather.current.windGust)}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Chuva Hoje */}
-                  <div className="p-3.5 rounded-[20px] bg-blue-500/5 dark:bg-blue-500/10 border border-blue-500/15 dark:border-blue-500/20 leading-tight transition-all hover:scale-[1.02] flex flex-col justify-between">
-                    <div className="flex items-center gap-1.5 mb-1 text-blue-700 dark:text-blue-400">
-                      <CloudRain className="w-4 h-4 text-blue-500 shrink-0" />
-                      <span className="block text-[10px] font-black uppercase tracking-wider">Chuva Hoje</span>
-                    </div>
-                    <div className="mt-1">
-                      <span className="text-xl font-extrabold text-blue-600 dark:text-blue-300">
-                        {(weather.daily[0]?.rain_mm || 0).toFixed(1)} mm
-                      </span>
-                      <span className="block text-[9px] text-zinc-500 dark:text-zinc-400 mt-0.5 leading-none">
-                        Precipitação esperada
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
 
               {/* MAP COMPONENT IN MAP GRID */}
               <WeatherMap
@@ -1277,263 +1597,444 @@ export default function App() {
                 setActiveDayIndex={setActiveDayIndex}
               />
 
-              {/* INTERACTIVE COMPASS WIND CANVAS CHART (Positioned directly below map as requested) */}
-              <WindChart forecastDays={weather.daily} hourly={weather.hourly} isDark={isDark} />
+              {/* INTERACTIVE COMPASS WIND CANVAS CHART (COLLAPSIBLE) */}
+              <div
+                className={`rounded-[24px] sm:rounded-[32px] border transition-all duration-300 shadow-sm overflow-hidden ${
+                  isDark ? "bg-[#111111] border-zinc-800" : "bg-white border-[#E7E1D1]"
+                }`}
+              >
+                <button
+                  onClick={() => setIsWindChartExpanded((prev) => !prev)}
+                  className="w-full p-5 sm:p-6 flex items-center justify-between gap-3 text-left hover:opacity-90 transition-all select-none cursor-pointer"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="p-2.5 rounded-2xl bg-teal-500/10 text-teal-500 border border-teal-500/20 shrink-0">
+                      <Wind className="w-5 h-5" />
+                    </div>
+                    <div className="truncate">
+                      <h3 className="font-black text-sm sm:text-base text-[#1F1B16] dark:text-white truncate">
+                        Rosa dos Ventos e Gráfico Interativo
+                      </h3>
+                      <p className="text-[11px] sm:text-xs text-zinc-500 dark:text-zinc-400 font-medium truncate mt-0.5">
+                        Bússola de orientação das rajadas e direção dominante
+                      </p>
+                    </div>
+                  </div>
 
-              {/* SLIDER HOUR TIMELINE CARD */}
-              <ForecastTimeline
-                hourly={weather.hourly}
-                activeDayIndex={activeDayIndex}
-                setActiveDayIndex={setActiveDayIndex}
-                activeHourIndex={activeHourIndex}
-                setActiveHourIndex={setActiveHourIndex}
-                isDark={isDark}
-              />
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-teal-600 dark:text-teal-400 bg-teal-500/10 px-2 py-0.5 rounded-md hidden md:inline-block">
+                      {isWindChartExpanded ? "Expandido" : "Recolhido"}
+                    </span>
+                    {isWindChartExpanded ? (
+                      <ChevronUp className="w-5 h-5 text-zinc-400" />
+                    ) : (
+                      <ChevronDown className="w-5 h-5 text-zinc-400" />
+                    )}
+                  </div>
+                </button>
 
-              {/* BEAUFORT scale reference */}
-              <BeaufortScale currentWindSpeedKmh={weather.current.windSpeed} isDark={isDark} />
+                {isWindChartExpanded && (
+                  <div className="p-5 sm:p-6 pt-0 border-t border-zinc-200/50 dark:border-zinc-800/80 transition-all">
+                    <WindChart forecastDays={weather.daily} hourly={weather.hourly} isDark={isDark} />
+                  </div>
+                )}
+              </div>
 
-              {/* DEDICATED SEA WATER TEMPERATURE, SAFETY FLAGS & NEARBY BEACHES CARD */}
-              <BeachSeaCard
-                locationName={location.name}
-                latitude={location.latitude}
-                longitude={location.longitude}
-                current={weather.current}
-                daily={weather.daily}
-                activeDayIndex={activeDayIndex}
-                setActiveDayIndex={setActiveDayIndex}
-                isDark={isDark}
-              />
+              {/* BEAUFORT scale reference (COLLAPSIBLE) */}
+              <div
+                className={`rounded-[24px] sm:rounded-[32px] border transition-all duration-300 shadow-sm overflow-hidden ${
+                  isDark ? "bg-[#111111] border-zinc-800" : "bg-white border-[#E7E1D1]"
+                }`}
+              >
+                <button
+                  onClick={() => setIsBeaufortExpanded((prev) => !prev)}
+                  className="w-full p-5 sm:p-6 flex items-center justify-between gap-3 text-left hover:opacity-90 transition-all select-none cursor-pointer"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="p-2.5 rounded-2xl bg-amber-500/10 text-amber-500 border border-amber-500/20 shrink-0">
+                      <Thermometer className="w-5 h-5" />
+                    </div>
+                    <div className="truncate">
+                      <h3 className="font-black text-sm sm:text-base text-[#1F1B16] dark:text-white truncate">
+                        Escala de Beaufort (Força dos Ventos)
+                      </h3>
+                      <p className="text-[11px] sm:text-xs text-zinc-500 dark:text-zinc-400 font-medium truncate mt-0.5">
+                        Classificação científica da intensidade do vento e efeitos em terra e mar
+                      </p>
+                    </div>
+                  </div>
 
-              {/* 16 DAYS HORIZONTAL LIST */}
-              <ForecastList
-                days={weather.daily}
-                activeDayIndex={activeDayIndex}
-                setActiveDayIndex={setActiveDayIndex}
-                isDark={isDark}
-              />
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md hidden md:inline-block">
+                      {isBeaufortExpanded ? "Expandido" : "Recolhido"}
+                    </span>
+                    {isBeaufortExpanded ? (
+                      <ChevronUp className="w-5 h-5 text-zinc-400" />
+                    ) : (
+                      <ChevronDown className="w-5 h-5 text-zinc-400" />
+                    )}
+                  </div>
+                </button>
+
+                {isBeaufortExpanded && (
+                  <div className="p-5 sm:p-6 pt-0 border-t border-zinc-200/50 dark:border-zinc-800/80 transition-all">
+                    <BeaufortScale currentWindSpeedKmh={weather.current.windSpeed} isDark={isDark} />
+                  </div>
+                )}
+              </div>
+
+              {/* DEDICATED SEA WATER TEMPERATURE, SAFETY FLAGS & NEARBY BEACHES CARD (COLLAPSIBLE) */}
+              <div
+                className={`rounded-[24px] sm:rounded-[32px] border transition-all duration-300 shadow-sm overflow-hidden ${
+                  isDark ? "bg-[#111111] border-zinc-800" : "bg-white border-[#E7E1D1]"
+                }`}
+              >
+                <button
+                  onClick={() => setIsBeachSeaExpanded((prev) => !prev)}
+                  className="w-full p-5 sm:p-6 flex items-center justify-between gap-3 text-left hover:opacity-90 transition-all select-none cursor-pointer"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="p-2.5 rounded-2xl bg-blue-500/10 text-blue-500 border border-blue-500/20 shrink-0">
+                      <Waves className="w-5 h-5" />
+                    </div>
+                    <div className="truncate">
+                      <h3 className="font-black text-sm sm:text-base text-[#1F1B16] dark:text-white truncate">
+                        Condições de Balneabilidade & Temperatura do Mar
+                      </h3>
+                      <p className="text-[11px] sm:text-xs text-zinc-500 dark:text-zinc-400 font-medium truncate mt-0.5">
+                        Temperatura da água, praias próximas e bandeiras de segurança marítima
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-md hidden md:inline-block">
+                      {isBeachSeaExpanded ? "Expandido" : "Recolhido"}
+                    </span>
+                    {isBeachSeaExpanded ? (
+                      <ChevronUp className="w-5 h-5 text-zinc-400" />
+                    ) : (
+                      <ChevronDown className="w-5 h-5 text-zinc-400" />
+                    )}
+                  </div>
+                </button>
+
+                {isBeachSeaExpanded && (
+                  <div className="p-5 sm:p-6 pt-0 border-t border-zinc-200/50 dark:border-zinc-800/80 transition-all">
+                    <BeachSeaCard
+                      locationName={location.name}
+                      latitude={location.latitude}
+                      longitude={location.longitude}
+                      current={weather.current}
+                      daily={weather.daily}
+                      activeDayIndex={activeDayIndex}
+                      setActiveDayIndex={setActiveDayIndex}
+                      isDark={isDark}
+                    />
+                  </div>
+                )}
+              </div>
+
+
             </div>
 
             {/* RIGHT SIDEBAR COLUMN: Gemini AI Climate Assistant & Civil Defense & SMS zipcode tool */}
             <div className="lg:col-span-1 space-y-6">
               
-              {/* Intelligent AI Assistant Card */}
-              <GeminiAssistant
-                locationName={location.name}
-                current={weather.current}
-                dailyForecasts={weather.daily}
-                isDark={isDark}
-              />
-
-              {/* OFFICIAL CIVIL DEFENSE CONTACT CHANNELS */}
+              {/* Intelligent AI Assistant Card (COLLAPSIBLE) */}
               <div
-                className={`rounded-[32px] p-6 border transition-all duration-300 shadow-sm space-y-4 ${
+                className={`rounded-[24px] sm:rounded-[32px] border transition-all duration-300 shadow-sm overflow-hidden ${
+                  isDark ? "bg-[#111111] border-zinc-800" : "bg-white border-[#E7E1D1]"
+                }`}
+              >
+                <button
+                  onClick={() => setIsGeminiAssistantExpanded((prev) => !prev)}
+                  className="w-full p-5 sm:p-6 flex items-center justify-between gap-3 text-left hover:opacity-90 transition-all select-none cursor-pointer"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="p-2.5 rounded-2xl bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 shrink-0">
+                      <Bot className="w-5 h-5" />
+                    </div>
+                    <div className="truncate">
+                      <h3 className="font-black text-sm sm:text-base text-[#1F1B16] dark:text-white truncate">
+                        Assistente Climático Gemini AI
+                      </h3>
+                      <p className="text-[11px] sm:text-xs text-zinc-500 dark:text-zinc-400 font-medium truncate mt-0.5">
+                        Análise de riscos baseada em IA e respostas para dúvidas locais
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-md hidden md:inline-block">
+                      {isGeminiAssistantExpanded ? "Expandido" : "Recolhido"}
+                    </span>
+                    {isGeminiAssistantExpanded ? (
+                      <ChevronUp className="w-5 h-5 text-zinc-400" />
+                    ) : (
+                      <ChevronDown className="w-5 h-5 text-zinc-400" />
+                    )}
+                  </div>
+                </button>
+
+                {isGeminiAssistantExpanded && (
+                  <div className="p-5 sm:p-6 pt-0 border-t border-zinc-200/50 dark:border-zinc-800/80 transition-all">
+                    <GeminiAssistant
+                      locationName={location.name}
+                      current={weather.current}
+                      dailyForecasts={weather.daily}
+                      isDark={isDark}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* OFFICIAL CIVIL DEFENSE CONTACT CHANNELS (COLLAPSIBLE) */}
+              <div
+                className={`rounded-[24px] sm:rounded-[32px] border transition-all duration-300 shadow-sm overflow-hidden ${
                   isDark ? "bg-[#111111] border-zinc-800 text-zinc-100" : "bg-[#F4F9F2] border-[#E0EFE0]"
                 }`}
               >
-                <div className="flex items-center gap-2">
-                  <div className="p-2 rounded-full bg-emerald-600/10 text-emerald-700">
-                    <PhoneCall className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-extrabold tracking-tight text-emerald-900 dark:text-emerald-100">
-                      Canais Oficiais da Defesa Civil
-                    </h3>
-                    <p className="text-xs text-emerald-700/80 dark:text-emerald-300/80">
-                      Contatos diretos para apoio e alertas regionais de desastres
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-2.5">
-                  {/* WhatsApp contact dial */}
-                  <a
-                    href="https://wa.me/556120344611?text=Oi"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center justify-between p-3 rounded-xl bg-[#25D366] hover:bg-[#20ba59] text-white font-extrabold text-xs tracking-wide transition-all shadow-md select-none"
-                  >
-                    <span className="flex items-center gap-2">
-                      <MessageSquare className="w-4 h-4 fill-current" />
-                      📱 WhatsApp Nacional: (61) 2034-4611
-                    </span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
-
-                  {/* S2iD Federal System Link */}
-                  <a
-                    href="https://s2id.mi.gov.br/"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center justify-between p-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs tracking-wide transition-all shadow-md select-none"
-                  >
-                    <span>🌐 Portal S2iD Federal (Desastres)</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
-                </div>
-
-                {/* SMS 40199 Zipcode Alert subscription simulator */}
-                <div className="border-t border-[#E7E1D1]/30 dark:border-zinc-800/60 pt-4 mt-2">
-                  <p className="text-[11px] font-extrabold text-[#7E7667] dark:text-zinc-300 uppercase tracking-wider mb-2">
-                    💬 SMS Nacional 40199 (Cadastro)
-                  </p>
-                  <form onSubmit={handleSmsSubmit} className="flex gap-2">
-                    <input
-                      type="text"
-                      placeholder="Seu CEP (ex: 24900-000)"
-                      value={smsZip}
-                      onChange={(e) => setSmsZip(e.target.value)}
-                      className={`flex-1 px-3 py-2 rounded-xl text-xs font-bold border outline-none ${
-                        isDark ? "bg-[#1A1A1A] border-zinc-800 text-white" : "bg-white border-[#E7E1D1]"
-                      }`}
-                    />
-                    <button
-                      type="submit"
-                      className="px-4 py-2 rounded-xl bg-[#E2725B] hover:bg-[#D15F47] text-white font-black text-xs transition-colors shadow-sm"
-                    >
-                      Enviar
-                    </button>
-                  </form>
-
-                  {/* Simulator feedback status */}
-                  {smsStatus === "sending" && (
-                    <p className="text-[10px] text-gray-500 mt-1 animate-pulse">Submetendo cadastro de CEP ao 40199...</p>
-                  )}
-                  {smsStatus === "success" && (
-                    <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-1 font-bold">
-                      ✅ Simulação Completa! Cadastro de alertas para o CEP {smsZip} enviado ao SMS 40199.
-                    </p>
-                  )}
-
-                  {/* Cloud registered CEP list */}
-                  {smsRegistrations.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-[#E7E1D1]/20 dark:border-zinc-800/40">
-                      <p className="text-[9px] font-extrabold text-[#7E7667] dark:text-zinc-400 uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                        <span className="flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                          CEPs na Nuvem ({smsRegistrations.length}):
-                        </span>
-                        <span className="text-[8px] opacity-70">Sincronizado via Firebase</span>
-                      </p>
-                      <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto scrollbar-thin">
-                        {smsRegistrations.map((reg, idx) => (
-                          <span
-                            key={reg.id || idx}
-                            className={`px-2 py-0.5 rounded-md text-[9px] font-black tracking-wide flex items-center gap-1 ${
-                              isDark
-                                ? "bg-zinc-900 border border-zinc-800 text-zinc-300"
-                                : "bg-emerald-500/10 border border-emerald-500/20 text-emerald-700"
-                            }`}
-                          >
-                            <span>{reg.zipcode}</span>
-                            <button
-                              onClick={() => handleRemoveSms(reg.id || reg.zipcode)}
-                              className="text-red-500 hover:text-red-700 ml-0.5 font-bold cursor-pointer"
-                              title="Remover CEP da Nuvem"
-                            >
-                              ✕
-                            </button>
-                          </span>
-                        ))}
-                      </div>
+                <button
+                  onClick={() => setIsCivilDefenseChannelsExpanded((prev) => !prev)}
+                  className="w-full p-5 sm:p-6 flex items-center justify-between gap-3 text-left hover:opacity-90 transition-all select-none cursor-pointer"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="p-2.5 rounded-2xl bg-emerald-600/10 text-emerald-700 border border-emerald-500/20 shrink-0">
+                      <PhoneCall className="w-5 h-5" />
                     </div>
-                  )}
+                    <div className="truncate">
+                      <h3 className="font-black text-sm sm:text-base text-emerald-900 dark:text-emerald-100 truncate">
+                        Canais Oficiais da Defesa Civil
+                      </h3>
+                      <p className="text-[11px] sm:text-xs text-emerald-700/80 dark:text-emerald-300/80 font-medium truncate mt-0.5">
+                        Contatos diretos para apoio, alertas e cadastro de CEP no 40199
+                      </p>
+                    </div>
+                  </div>
 
-                  <p className="text-[9px] text-[#7E7667] dark:text-zinc-400 mt-2 italic leading-relaxed">
-                    * No celular real, basta enviar um SMS gratuito com o seu CEP para o número 40199 para se registrar.
-                  </p>
-                </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md hidden md:inline-block">
+                      {isCivilDefenseChannelsExpanded ? "Expandido" : "Recolhido"}
+                    </span>
+                    {isCivilDefenseChannelsExpanded ? (
+                      <ChevronUp className="w-5 h-5 text-zinc-400" />
+                    ) : (
+                      <ChevronDown className="w-5 h-5 text-zinc-400" />
+                    )}
+                  </div>
+                </button>
+
+                {isCivilDefenseChannelsExpanded && (
+                  <div className="p-5 sm:p-6 pt-0 border-t border-[#E7E1D1]/30 dark:border-zinc-800/60 space-y-4">
+                    <div className="flex flex-col gap-2.5">
+                      {/* WhatsApp contact dial */}
+                      <a
+                        href="https://wa.me/556120344611?text=Oi"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center justify-between p-3 rounded-xl bg-[#25D366] hover:bg-[#20ba59] text-white font-extrabold text-xs tracking-wide transition-all shadow-md select-none"
+                      >
+                        <span className="flex items-center gap-2">
+                          <MessageSquare className="w-4 h-4 fill-current" />
+                          📱 WhatsApp Nacional: (61) 2034-4611
+                        </span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+
+                      {/* S2iD Federal System Link */}
+                      <a
+                        href="https://s2id.mi.gov.br/"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center justify-between p-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs tracking-wide transition-all shadow-md select-none"
+                      >
+                        <span>🌐 Portal S2iD Federal (Desastres)</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    </div>
+
+                    {/* SMS 40199 Zipcode Alert subscription simulator */}
+                    <div className="border-t border-[#E7E1D1]/30 dark:border-zinc-800/60 pt-4 mt-2">
+                      <p className="text-[11px] font-extrabold text-[#7E7667] dark:text-zinc-300 uppercase tracking-wider mb-2">
+                        💬 SMS Nacional 40199 (Cadastro)
+                      </p>
+                      <form onSubmit={handleSmsSubmit} className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="Seu CEP (ex: 24900-000)"
+                          value={smsZip}
+                          onChange={(e) => setSmsZip(e.target.value)}
+                          className={`flex-1 px-3 py-2 rounded-xl text-xs font-bold border outline-none ${
+                            isDark ? "bg-[#1A1A1A] border-zinc-800 text-white" : "bg-white border-[#E7E1D1]"
+                          }`}
+                        />
+                        <button
+                          type="submit"
+                          className="px-4 py-2 rounded-xl bg-[#E2725B] hover:bg-[#D15F47] text-white font-black text-xs transition-colors shadow-sm"
+                        >
+                          Enviar
+                        </button>
+                      </form>
+
+                      {/* Simulator feedback status */}
+                      {smsStatus === "sending" && (
+                        <p className="text-[10px] text-gray-500 mt-1 animate-pulse">Submetendo cadastro de CEP ao 40199...</p>
+                      )}
+                      {smsStatus === "success" && (
+                        <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-1 font-bold">
+                          ✅ Simulação Completa! Cadastro de alertas para o CEP {smsZip} enviado ao SMS 40199.
+                        </p>
+                      )}
+
+                      {/* Cloud registered CEP list */}
+                      {smsRegistrations.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-[#E7E1D1]/20 dark:border-zinc-800/40">
+                          <p className="text-[9px] font-extrabold text-[#7E7667] dark:text-zinc-400 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                            <span className="flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                              CEPs na Nuvem ({smsRegistrations.length}):
+                            </span>
+                            <span className="text-[8px] opacity-70">Sincronizado via Firebase</span>
+                          </p>
+                          <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto scrollbar-thin font-bold">
+                            {smsRegistrations.map((reg, idx) => (
+                              <span
+                                key={reg.id || idx}
+                                className={`px-2 py-0.5 rounded-md text-[9px] font-black tracking-wide flex items-center gap-1 ${
+                                  isDark
+                                    ? "bg-zinc-900 border border-zinc-800 text-zinc-300"
+                                    : "bg-emerald-500/10 border border-emerald-500/20 text-emerald-700"
+                                }`}
+                              >
+                                <span>{reg.zipcode}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveSms(reg.id || reg.zipcode)}
+                                  className="text-red-500 hover:text-red-700 ml-0.5 font-bold cursor-pointer"
+                                  title="Remover CEP da Nuvem"
+                                >
+                                  ✕
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <p className="text-[9px] text-[#7E7667] dark:text-zinc-400 mt-2 italic leading-relaxed">
+                        * No celular real, basta enviar um SMS gratuito com o seu CEP para o número 40199 para se registrar.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {/* RELATOS E ANOTAÇÕES DE CAMPO (SINCRONIZADO NA NUVEM) */}
+              {/* RELATOS E ANOTAÇÕES DE CAMPO (SINCRONIZADO NA NUVEM) (COLLAPSIBLE) */}
               <div
-                className={`rounded-[32px] p-6 border transition-all duration-300 shadow-sm space-y-4 ${
+                className={`rounded-[24px] sm:rounded-[32px] border transition-all duration-300 shadow-sm overflow-hidden ${
                   isDark ? "bg-[#111111] border-zinc-800 text-zinc-100" : "bg-[#FAF7F2] border-[#E7E1D1]"
                 }`}
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="p-2 rounded-full bg-amber-500/15 text-amber-500">
-                      <Zap className="w-4 h-4" />
+                <button
+                  onClick={() => setIsWeatherNotesExpanded((prev) => !prev)}
+                  className="w-full p-5 sm:p-6 flex items-center justify-between gap-3 text-left hover:opacity-90 transition-all select-none cursor-pointer"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="p-2.5 rounded-2xl bg-amber-500/10 text-amber-500 border border-amber-500/20 shrink-0">
+                      <BookOpen className="w-5 h-5" />
                     </div>
-                    <div>
-                      <h3 className="text-sm font-extrabold tracking-tight">
+                    <div className="truncate">
+                      <h3 className="font-black text-sm sm:text-base text-[#1F1B16] dark:text-white truncate">
                         Anotações do Usuário (Nuvem em Tempo Real)
                       </h3>
-                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                        Sincroniza instantaneamente entre celular, tablet e computador
+                      <p className="text-[11px] sm:text-xs text-zinc-500 dark:text-zinc-400 font-medium truncate mt-0.5">
+                        Relatos sincronizados instantaneamente entre seus dispositivos
                       </p>
                     </div>
                   </div>
-                  <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
-                    Live Firebase
-                  </span>
-                </div>
 
-                {/* Form to add note */}
-                <form onSubmit={handleAddWeatherNote} className="space-y-2">
-                  <input
-                    type="text"
-                    placeholder="Título da observação (ex: Vento forte no Pontal)"
-                    value={noteTitle}
-                    onChange={(e) => setNoteTitle(e.target.value)}
-                    className={`w-full px-3 py-2 rounded-xl text-xs font-bold border outline-none ${
-                      isDark ? "bg-[#1A1A1A] border-zinc-800 text-white" : "bg-white border-[#E7E1D1]"
-                    }`}
-                  />
-                  <textarea
-                    placeholder="Detalhes (ex: Rajadas levantando areia na praia das 14h às 16h...)"
-                    value={noteContent}
-                    onChange={(e) => setNoteContent(e.target.value)}
-                    rows={2}
-                    className={`w-full px-3 py-2 rounded-xl text-xs font-medium border outline-none ${
-                      isDark ? "bg-[#1A1A1A] border-zinc-800 text-white" : "bg-white border-[#E7E1D1]"
-                    }`}
-                  />
-                  <button
-                    type="submit"
-                    disabled={isSubmittingNote}
-                    className="w-full py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition-colors shadow-md flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    <span>{isSubmittingNote ? "Salvando na Nuvem..." : "➕ Publicar Relato na Nuvem"}</span>
-                  </button>
-                </form>
-
-                {/* Weather notes list */}
-                {weatherNotes.length > 0 ? (
-                  <div className="space-y-2 max-h-48 overflow-y-auto scrollbar-thin pt-2 border-t border-zinc-800/20">
-                    {weatherNotes.map((note) => (
-                      <div
-                        key={note.id}
-                        className={`p-3 rounded-2xl border text-xs space-y-1 relative group ${
-                          isDark ? "bg-zinc-900/80 border-zinc-800" : "bg-white border-[#E7E1D1]"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between pr-5">
-                          <h4 className="font-extrabold text-amber-500 dark:text-amber-400">
-                            {note.title}
-                          </h4>
-                          <span className="text-[9px] text-zinc-500">
-                            {note.locationName}
-                          </span>
-                        </div>
-                        <p className="text-[11px] opacity-90 leading-relaxed font-medium">
-                          {note.content}
-                        </p>
-                        <button
-                          onClick={() => handleDeleteWeatherNote(note.id)}
-                          className="absolute top-2.5 right-2.5 text-zinc-400 hover:text-red-500 font-bold text-xs"
-                          title="Deletar da nuvem"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md hidden md:inline-block">
+                      {isWeatherNotesExpanded ? "Expandido" : "Recolhido"}
+                    </span>
+                    {isWeatherNotesExpanded ? (
+                      <ChevronUp className="w-5 h-5 text-zinc-400" />
+                    ) : (
+                      <ChevronDown className="w-5 h-5 text-zinc-400" />
+                    )}
                   </div>
-                ) : (
-                  <p className="text-[10px] text-zinc-500 dark:text-zinc-400 italic text-center py-2">
-                    Nenhum relato gravado ainda. Crie uma nota acima e ela aparecerá automaticamente em todos os seus dispositivos.
-                  </p>
+                </button>
+
+                {isWeatherNotesExpanded && (
+                  <div className="p-5 sm:p-6 pt-0 border-t border-[#E7E1D1]/30 dark:border-zinc-800/60 space-y-4">
+                    {/* Form to add note */}
+                    <form onSubmit={handleAddWeatherNote} className="space-y-2">
+                      <input
+                        type="text"
+                        placeholder="Título da observação (ex: Vento forte no Pontal)"
+                        value={noteTitle}
+                        onChange={(e) => setNoteTitle(e.target.value)}
+                        className={`w-full px-3 py-2 rounded-xl text-xs font-bold border outline-none ${
+                          isDark ? "bg-[#1A1A1A] border-zinc-800 text-white" : "bg-white border-[#E7E1D1]"
+                        }`}
+                      />
+                      <textarea
+                        placeholder="Detalhes (ex: Rajadas levantando areia na praia das 14h às 16h...)"
+                        value={noteContent}
+                        onChange={(e) => setNoteContent(e.target.value)}
+                        rows={2}
+                        className={`w-full px-3 py-2 rounded-xl text-xs font-medium border outline-none ${
+                          isDark ? "bg-[#1A1A1A] border-zinc-800 text-white" : "bg-white border-[#E7E1D1]"
+                        }`}
+                      />
+                      <button
+                        type="submit"
+                        disabled={isSubmittingNote}
+                        className="w-full py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition-colors shadow-md flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <span>{isSubmittingNote ? "Salvando na Nuvem..." : "➕ Publicar Relato na Nuvem"}</span>
+                      </button>
+                    </form>
+
+                    {/* Weather notes list */}
+                    {weatherNotes.length > 0 ? (
+                      <div className="space-y-2 max-h-48 overflow-y-auto scrollbar-thin pt-2 border-t border-[#E7E1D1]/30 dark:border-zinc-800/60">
+                        {weatherNotes.map((note) => (
+                          <div
+                            key={note.id}
+                            className={`p-3 rounded-2xl border text-xs space-y-1 relative group ${
+                              isDark ? "bg-zinc-900/80 border-zinc-800" : "bg-white border-[#E7E1D1]"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between pr-5">
+                              <h4 className="font-extrabold text-amber-500 dark:text-amber-400">
+                                {note.title}
+                              </h4>
+                              <span className="text-[9px] text-zinc-500">
+                                {note.locationName}
+                              </span>
+                            </div>
+                            <p className="text-[11px] opacity-90 leading-relaxed font-medium">
+                              {note.content}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteWeatherNote(note.id)}
+                              className="absolute top-2.5 right-2.5 text-zinc-400 hover:text-red-500 font-bold text-xs"
+                              title="Deletar da nuvem"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-zinc-500 dark:text-zinc-400 italic text-center py-2">
+                        Nenhum relato gravado ainda. Crie uma nota acima e ela aparecerá automaticamente em todos os seus dispositivos.
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -1547,6 +2048,69 @@ export default function App() {
               </div>
             </div>
 
+          </div>
+        )}
+
+        {/* PWA INSTALLATION GUIDE MODAL */}
+        {showPwaModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fadeIn">
+            <div
+              className={`relative w-full max-w-md rounded-3xl p-6 border shadow-2xl space-y-4 ${
+                isDark ? "bg-[#141414] border-zinc-800 text-white" : "bg-white border-[#E7E1D1] text-[#1F1B16]"
+              }`}
+            >
+              <button
+                onClick={() => setShowPwaModal(false)}
+                className="absolute top-4 right-4 p-2 rounded-full hover:bg-zinc-500/10 transition-colors"
+              >
+                <X className="w-5 h-5 text-zinc-400" />
+              </button>
+
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-2xl bg-[#E2725B]/15 text-[#E2725B] border border-[#E2725B]/30">
+                  <Smartphone className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-black text-base">Instalar Climavento</h3>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+                    Adicione à tela inicial para usar como um app nativo no celular
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-3 pt-2 text-xs leading-relaxed">
+                {/* Android / Chrome instructions */}
+                <div className="p-3.5 rounded-2xl bg-sky-500/10 border border-sky-500/20 space-y-1">
+                  <span className="font-black text-sky-600 dark:text-sky-400 block uppercase tracking-wider text-[10px]">
+                    📱 No Android (Chrome / Samsung Internet)
+                  </span>
+                  <ol className="list-decimal list-inside space-y-1 font-semibold text-zinc-700 dark:text-zinc-300">
+                    <li>Toque no menu de três pontos <strong>(⋮)</strong> no canto superior direito.</li>
+                    <li>Selecione <strong>"Adicionar à tela inicial"</strong> ou <strong>"Instalar aplicativo"</strong>.</li>
+                    <li>Confirme e o ícone do Climavento aparecerá junto com seus outros apps!</li>
+                  </ol>
+                </div>
+
+                {/* iOS / Safari instructions */}
+                <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 space-y-1">
+                  <span className="font-black text-amber-600 dark:text-amber-400 block uppercase tracking-wider text-[10px]">
+                    🍏 No iPhone / iPad (Safari)
+                  </span>
+                  <ol className="list-decimal list-inside space-y-1 font-semibold text-zinc-700 dark:text-zinc-300">
+                    <li>Toque no botão <strong>Compartilhar <Share2 className="w-3.5 h-3.5 inline ml-0.5" /></strong> na barra inferior.</li>
+                    <li>Role para baixo e selecione <strong>"Adicionar à Tela de Início"</strong>.</li>
+                    <li>Toque em <strong>"Adicionar"</strong> no canto superior direito.</li>
+                  </ol>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowPwaModal(false)}
+                className="w-full py-3 rounded-2xl bg-[#E2725B] hover:bg-[#d0614b] text-white font-black text-xs transition-colors shadow-lg cursor-pointer"
+              >
+                Entendi!
+              </button>
+            </div>
           </div>
         )}
 

@@ -203,21 +203,21 @@ export default function CivilDefenseAlertBanner({
   return (
     <div className="space-y-4">
       {/* GPS & Sistema Alerta Rio Direct Source Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-2xl bg-black/10 dark:bg-white/5 border border-zinc-800/10 dark:border-zinc-800/30 text-xs">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 p-3 sm:p-3.5 rounded-2xl bg-black/10 dark:bg-white/5 border border-zinc-800/10 dark:border-zinc-800/30 text-xs">
         {/* Left: GPS & City status */}
-        <div className="flex items-center gap-2.5 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap text-xs">
           {isGPSActive ? (
             <span className="flex items-center gap-1.5 font-bold text-emerald-600 dark:text-emerald-400">
               <span className="relative flex h-2.5 w-2.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
               </span>
-              GPS Ativo: <strong>{cityName}</strong>
+              GPS: <strong className="truncate max-w-[140px] sm:max-w-none">{cityName}</strong>
             </span>
           ) : (
             <span className="flex items-center gap-1.5 font-semibold text-zinc-700 dark:text-zinc-300">
-              <MapPin className="w-4 h-4 text-amber-500 shrink-0" />
-              Localização: <strong>{cityName}</strong>
+              <MapPin className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+              Local: <strong className="truncate max-w-[140px] sm:max-w-none">{cityName}</strong>
             </span>
           )}
 
@@ -226,29 +226,29 @@ export default function CivilDefenseAlertBanner({
             href="https://www.sistema-alerta-rio.com.br/"
             target="_blank"
             rel="noopener noreferrer"
-            className="px-2.5 py-1 rounded-xl bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/25 border border-cyan-500/30 text-[11px] font-black tracking-tight flex items-center gap-1 transition-all"
+            className="px-2 py-1 rounded-xl bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/25 border border-cyan-500/30 text-[10px] sm:text-[11px] font-black tracking-tight flex items-center gap-1 transition-all shrink-0"
             title="Acessar portal oficial www.sistema-alerta-rio.com.br"
           >
-            <Radio className="w-3.5 h-3.5 animate-pulse text-cyan-500" />
-            <span>Sistema Alerta Rio (Oficial)</span>
-            <ExternalLink className="w-3 h-3" />
+            <Radio className="w-3 h-3 animate-pulse text-cyan-500" />
+            <span>Sistema Alerta Rio</span>
+            <ExternalLink className="w-2.5 h-2.5" />
           </a>
         </div>
 
         {/* Right: Controls & Radar Modal Launcher */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
           <button
             onClick={() => setShowRadarModal(true)}
-            className="px-3 py-1.5 rounded-xl bg-purple-500/20 text-purple-600 dark:text-purple-300 border border-purple-500/30 font-black text-xs hover:bg-purple-500/30 transition-all flex items-center gap-1.5 shrink-0"
+            className="flex-1 sm:flex-initial px-2.5 py-1.5 rounded-xl bg-purple-500/20 text-purple-600 dark:text-purple-300 border border-purple-500/30 font-black text-[11px] sm:text-xs hover:bg-purple-500/30 transition-all flex items-center justify-center gap-1.5 shrink-0"
           >
-            <Eye className="w-3.5 h-3.5 text-purple-500" />
-            <span>Radar Meteorológico Alerta Rio</span>
+            <Eye className="w-3.5 h-3.5 text-purple-500 shrink-0" />
+            <span>Radar Alerta Rio</span>
           </button>
 
           <button
             onClick={onTriggerGPS}
             disabled={isGPSLoading}
-            className={`px-3 py-1.5 rounded-xl font-black text-xs transition-all shadow-md flex items-center gap-1.5 shrink-0 select-none cursor-pointer ${
+            className={`flex-1 sm:flex-initial px-2.5 py-1.5 rounded-xl font-black text-[11px] sm:text-xs transition-all shadow-md flex items-center justify-center gap-1.5 shrink-0 select-none cursor-pointer ${
               isGPSActive
                 ? "bg-zinc-800 text-white hover:bg-zinc-700 dark:bg-zinc-700 dark:hover:bg-zinc-600"
                 : "bg-amber-500 text-slate-950 hover:bg-amber-400"
@@ -256,13 +256,13 @@ export default function CivilDefenseAlertBanner({
           >
             {isGPSLoading ? (
               <>
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>GPS Buscando...</span>
+                <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
+                <span>Buscando...</span>
               </>
             ) : (
               <>
-                <Navigation className="w-3.5 h-3.5" />
-                <span>{isGPSActive ? "Re-sincronizar GPS" : "Usar GPS do Celular"}</span>
+                <Navigation className="w-3.5 h-3.5 shrink-0" />
+                <span>{isGPSActive ? "Atualizar GPS" : "Usar GPS"}</span>
               </>
             )}
           </button>
@@ -270,28 +270,28 @@ export default function CivilDefenseAlertBanner({
       </div>
 
       {/* Official 5 Operational Stages Bar (Sistema Alerta Rio / Defesa Civil Fluminense) */}
-      <div className="p-3 rounded-2xl bg-black/10 dark:bg-white/5 border border-zinc-800/10 dark:border-zinc-800/30 space-y-2">
-        <div className="flex items-center justify-between text-[11px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-400">
-          <span className="flex items-center gap-1.5">
-            <Gauge className="w-3.5 h-3.5 text-amber-500" /> Escala Oficial de Estágios Operacionais (Alerta Rio / Defesa Civil)
+      <div className="p-2.5 sm:p-3 rounded-2xl bg-black/10 dark:bg-white/5 border border-zinc-800/10 dark:border-zinc-800/30 space-y-2">
+        <div className="flex items-center justify-between text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-400 flex-wrap gap-1">
+          <span className="flex items-center gap-1">
+            <Gauge className="w-3.5 h-3.5 text-amber-500 shrink-0" /> Estágios Operacionais (Alerta Rio)
           </span>
-          <span className="text-[10px] opacity-80">Atualização em Tempo Real</span>
+          <span className="text-[9px] opacity-75">Ao Vivo</span>
         </div>
-        <div className="grid grid-cols-5 gap-1.5 text-center">
+        <div className="grid grid-cols-5 gap-1 text-center">
           {alertaRioStages.map((stg) => {
             const isCurrent = config.stageLevel === stg.level;
             return (
               <div
                 key={stg.level}
-                className={`py-1.5 px-1 rounded-xl text-[10px] font-black uppercase transition-all flex flex-col items-center justify-center gap-0.5 border ${
+                className={`py-1.5 px-0.5 rounded-xl text-[9px] sm:text-[10px] font-black uppercase transition-all flex flex-col items-center justify-center gap-0.5 border ${
                   isCurrent
-                    ? `${stg.color} ring-2 ring-white/50 scale-105 shadow-md border-transparent`
+                    ? `${stg.color} ring-2 ring-white/50 scale-[1.02] shadow-md border-transparent`
                     : "bg-black/10 dark:bg-white/5 border-zinc-800/20 opacity-50 text-zinc-700 dark:text-zinc-300"
                 }`}
               >
-                <span>{stg.label}</span>
-                <span className="text-[9px] truncate max-w-full">{stg.name}</span>
-                {isCurrent && <span className="text-[8px] bg-black/20 px-1 rounded-full font-bold">ATUAL</span>}
+                <span>Nível {stg.level}</span>
+                <span className="text-[8px] sm:text-[9px] truncate max-w-full font-bold">{stg.name}</span>
+                {isCurrent && <span className="text-[7px] sm:text-[8px] bg-black/20 px-1 rounded-full font-bold">ATUAL</span>}
               </div>
             );
           })}

@@ -1,0 +1,23 @@
+{
+  "short_name": "Climavento",
+  "name": "Climavento — Meteorologia & Radar",
+  "icons": [
+    {
+      "src": "/pwa-icon.jpg",
+      "sizes": "192x192",
+      "type": "image/jpeg"
+    },
+    {
+      "src": "/pwa-icon.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#090d16",
+  "theme_color": "#090d16",
+  "display": "standalone",
+  "orientation": "portrait",
+  "scope": "/",
+  "description": "Previsão do tempo, estação meteorológica, radar ao vivo e alertas em tempo real."
+}

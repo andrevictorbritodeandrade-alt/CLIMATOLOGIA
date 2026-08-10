@@ -441,8 +441,14 @@ export default function WeatherMap({
 
       // Draw particles using their history for beautiful transparent trails
       particlesRef.current.forEach((p) => {
-        // Calculate velocity based on wind speed
-        const velocity = (windSpeedKmh * 0.08 + 1.0) * p.speedMultiplier;
+        // Spatial variation to create local wind fronts, gusts, and speed zones
+        const wave = Math.sin(p.x * 0.006 + p.y * 0.004) * 0.35 + Math.cos(p.x * 0.003 - p.y * 0.005) * 0.25;
+        // Local speed around activeWindSpeed with gusts
+        const localSpeedKmh = Math.max(3, windSpeedKmh * (1.0 + wave) * p.speedMultiplier);
+        const particleColor = getBeaufortColor(localSpeedKmh);
+
+        // Calculate velocity based on local wind speed
+        const velocity = (localSpeedKmh * 0.08 + 1.0);
         
         // Compute delta movement
         const dx = Math.cos(windRad) * velocity;
@@ -456,8 +462,8 @@ export default function WeatherMap({
         // Append current position to trail history
         p.history.push({ x: p.x, y: p.y });
         
-        // Keep trail length proportional to wind intensity
-        const maxHistory = windSpeedKmh > 40 ? 12 : windSpeedKmh > 15 ? 8 : 5;
+        // Keep trail length proportional to local wind intensity
+        const maxHistory = localSpeedKmh > 62 ? 14 : localSpeedKmh > 39 ? 10 : localSpeedKmh > 19 ? 7 : 4;
         if (p.history.length > maxHistory) {
           p.history.shift();
         }
@@ -473,9 +479,9 @@ export default function WeatherMap({
             ctx.moveTo(p1.x, p1.y);
             ctx.lineTo(p2.x, p2.y);
             
-            ctx.strokeStyle = color;
-            ctx.globalAlpha = ratio * (isDark ? 0.7 : 0.6); // smooth alpha fade
-            ctx.lineWidth = (windSpeedKmh > 30 ? 2.5 : 1.4) * ratio; // tapered width
+            ctx.strokeStyle = particleColor;
+            ctx.globalAlpha = ratio * (isDark ? 0.75 : 0.65); // smooth alpha fade
+            ctx.lineWidth = (localSpeedKmh > 39 ? 2.2 : 1.3) * ratio; // tapered width
             ctx.stroke();
           }
           // Reset globalAlpha to avoid affecting other renderings
@@ -483,9 +489,9 @@ export default function WeatherMap({
         }
 
         // Draw a bright glowing particle point for active fronts in high-contrast locations
-        if (windSpeedKmh > 12 && p.age % 15 === 0) {
+        if (localSpeedKmh > 39 && p.age % 12 === 0) {
           ctx.beginPath();
-          ctx.arc(p.x, p.y, windSpeedKmh > 35 ? 2 : 1.2, 0, 2 * Math.PI);
+          ctx.arc(p.x, p.y, localSpeedKmh > 62 ? 2.5 : 1.5, 0, 2 * Math.PI);
           ctx.fillStyle = isDark ? "#22D3EE" : "#0891B2"; // Cyan tip accent
           ctx.fill();
         }
@@ -551,6 +557,42 @@ export default function WeatherMap({
     return directions[index];
   };
 
+  const getOriginInfo = (deg: number) => {
+    if (deg >= 135 && deg <= 225) {
+      return {
+        title: "Vem do SUL do País / Frente Fria Oceânica",
+        emoji: "❄️🌊",
+        badgeBg: "bg-blue-500/15 text-blue-500 border-blue-500/30",
+        source: "Sul (RS/SC/PR e Atlântico Sul)",
+        desc: "Massa de ar e chuva vinda do Sul do continente e oceano, associada a frentes frias."
+      };
+    } else if (deg > 45 && deg < 135) {
+      return {
+        title: "Vem do OCEANO ATLÂNTICO / Mar Aberto",
+        emoji: "🌊💨",
+        badgeBg: "bg-cyan-500/15 text-cyan-500 border-cyan-500/30",
+        source: "Oceano Atlântico (Leste/Sudeste)",
+        desc: "Umidade marítima soprada diretamente do oceano em direção à costa."
+      };
+    } else if (deg >= 225 && deg <= 315) {
+      return {
+        title: "Vem do INTERIOR / Charcos e Lagunas",
+        emoji: "🌾🏞️",
+        badgeBg: "bg-emerald-500/15 text-emerald-500 border-emerald-500/30",
+        source: "Interior Continental / Charcos e Baixadas",
+        desc: "Instabilidade vinda dos charcos, serras e baixadas do interior continental."
+      };
+    } else {
+      return {
+        title: "Vem do NORTE / Serras Interiores",
+        emoji: "⛰️☀️",
+        badgeBg: "bg-amber-500/15 text-amber-500 border-amber-500/30",
+        source: "Quadrante Norte / Região Serrana",
+        desc: "Ventos do Norte transportando ar aquecido e umidade das serras."
+      };
+    }
+  };
+
   return (
     <div
       className={`relative w-full rounded-[32px] p-6 border transition-all duration-300 shadow-sm ${
@@ -565,15 +607,20 @@ export default function WeatherMap({
       {!isFullscreen && (
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-full bg-[#6E5D0E]/10 text-[#6E5D0E] dark:text-[#EAB308]">
-              <Wind className="w-5 h-5" />
+            <div className="p-2.5 rounded-2xl bg-[#E2725B]/15 text-[#E2725B] border border-[#E2725B]/30 shadow-sm">
+              <CloudRain className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-lg font-bold tracking-tight text-[#1F1B16] dark:text-white">
-                Mapa do Fluxo de Vento & Camadas
-              </h3>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Animação de partículas, rajadas e frentes atmosféricas no mapa
+              <div className="flex items-center gap-2">
+                <h3 className="text-lg font-black tracking-tight text-[#1F1B16] dark:text-white uppercase">
+                  RADAR METEOROLÓGICO
+                </h3>
+                <span className="px-2 py-0.5 rounded-full bg-red-500/15 border border-red-500/30 text-red-500 font-extrabold text-[9px] uppercase tracking-wider animate-pulse">
+                  Ao Vivo
+                </span>
+              </div>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+                Detecção de chuvas em tempo real, trajetória, origem do vento e intensidade por mm/min e dBZ
               </p>
             </div>
           </div>
@@ -659,7 +706,10 @@ export default function WeatherMap({
               }`}
             >
               <CloudRain className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-              <span>Radar</span>
+              <span>
+                <span className="inline sm:hidden">Radar Met.</span>
+                <span className="hidden sm:inline">Radar Meteorológico</span>
+              </span>
             </button>
             <button
               onClick={() => setMapMode("clouds")}
@@ -790,13 +840,67 @@ export default function WeatherMap({
                       </span>
                     </button>
                     {showWindDetails && (
-                      <div className="px-3 pb-3 pt-1 border-t border-zinc-800/10 dark:border-zinc-800/25 flex flex-col gap-1.5">
+                      <div className="px-3 pb-3 pt-1 border-t border-zinc-800/10 dark:border-zinc-800/25 flex flex-col gap-2.5">
                         <div className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400 leading-relaxed text-justify" style={{ textAlign: "justify" }}>
-                          <span className="font-bold text-zinc-700 dark:text-zinc-300">Direção dos Ventos:</span> As partículas mostram para onde as rajadas de vento sopram fisicamente. Correntes vindas do oceano trazem umidade, enquanto correntes terrestres trazem ar seco ou calor.
+                          <span className="font-bold text-[#E2725B]">Fluxo de Partículas Dinâmico:</span> Cada partícula no mapa se move de acordo com a velocidade do vento local (inclusive rajadas estimadas). As cores mudam em tempo real de acordo com a Escala Internacional de Beaufort:
                         </div>
-                        <div className="flex items-center gap-1.5 text-[10px] font-bold mt-1">
-                          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: getBeaufortColor(activeWindSpeed) }} />
-                          <span>Sentido: {getWindHeadingDirectionText(activeWindDeg)}</span>
+
+                        {/* Beaufort scale legend items */}
+                        <div className="space-y-1">
+                          <span className="text-[9px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 block">
+                            🚩 Escala de Velocidade dos Ventos
+                          </span>
+                          <div className="flex flex-col gap-1 text-[9px] font-bold">
+                            {/* Verde / Brisa Leve */}
+                            <div className="flex items-center justify-between p-1 rounded bg-emerald-500/10 border border-emerald-500/20">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-3 h-3 rounded-full bg-[#10B981] shrink-0" />
+                                <span className="text-emerald-700 dark:text-emerald-400">Brisa Leve a Moderada</span>
+                              </div>
+                              <span className="text-[8px] font-mono text-zinc-500 dark:text-zinc-400">&lt; 19 km/h</span>
+                            </div>
+
+                            {/* Amarelo / Observação */}
+                            <div className="flex items-center justify-between p-1 rounded bg-amber-500/10 border border-amber-500/20">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-3 h-3 rounded-full bg-[#EAB308] shrink-0" />
+                                <span className="text-amber-700 dark:text-amber-400">Vento Moderado (Observação)</span>
+                              </div>
+                              <span className="text-[8px] font-mono text-zinc-500 dark:text-zinc-400">19 - 38 km/h</span>
+                            </div>
+
+                            {/* Laranja / Atenção */}
+                            <div className="flex items-center justify-between p-1 rounded bg-orange-500/10 border border-orange-500/20">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-3 h-3 rounded-full bg-[#F97316] shrink-0" />
+                                <span className="text-orange-700 dark:text-orange-400">Vento Forte (Atenção)</span>
+                              </div>
+                              <span className="text-[8px] font-mono text-zinc-500 dark:text-zinc-400">39 - 61 km/h</span>
+                            </div>
+
+                            {/* Vermelho / Alerta */}
+                            <div className="flex items-center justify-between p-1 rounded bg-red-500/10 border border-red-500/20">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-3 h-3 rounded-full bg-[#EF4444] shrink-0" />
+                                <span className="text-red-700 dark:text-red-400">Ventania Forte (Alerta Civil)</span>
+                              </div>
+                              <span className="text-[8px] font-mono text-zinc-500 dark:text-zinc-400">62 - 88 km/h</span>
+                            </div>
+
+                            {/* Roxo / Crise */}
+                            <div className="flex items-center justify-between p-1 rounded bg-purple-500/10 border border-purple-500/20">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-3 h-3 rounded-full bg-[#A855F7] shrink-0" />
+                                <span className="text-purple-700 dark:text-purple-400">Vendaval Extremo / Crise</span>
+                              </div>
+                              <span className="text-[8px] font-mono text-zinc-500 dark:text-zinc-400">&ge; 89 km/h</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="text-[9px] font-extrabold bg-[#E2725B]/10 border border-[#E2725B]/20 p-2 rounded-lg text-[#E2725B] flex flex-col gap-0.5 mt-0.5">
+                          <span>🧭 <strong>Sentido:</strong> Soprando de <strong>{getCompassDirection(activeWindDeg)}</strong> para <strong>{getCompassDirection((activeWindDeg + 180) % 360)}</strong></span>
+                          <span>🚩 <strong>Média Atual:</strong> {activeWindSpeed} km/h (Variação Dinâmica Ativa)</span>
                         </div>
                       </div>
                     )}
@@ -815,36 +919,103 @@ export default function WeatherMap({
                     >
                       <div className="flex items-center gap-2 font-black text-xs text-[#E2725B] uppercase tracking-wider">
                         <CloudRain className="w-4 h-4" />
-                        <span>Radar de Chuva (dBZ)</span>
+                        <span>Radar de Chuva (dBZ, mm/h e Origem)</span>
                       </div>
                       <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-tight">
-                        {showRadarDetails ? "Ocultar ✕" : "Legenda ➔"}
+                        {showRadarDetails ? "Ocultar ✕" : "Legenda & Origem ➔"}
                       </span>
                     </button>
                     {showRadarDetails && (
-                      <div className="px-3 pb-3 pt-1 border-t border-zinc-800/10 dark:border-zinc-800/25 flex flex-col gap-2">
-                        {/* Precip Color Scale */}
-                        <div className="flex flex-col gap-1 text-[9px] font-bold">
-                          <div className="flex items-center gap-2">
-                            <span className="w-3 h-2 rounded bg-[#22C55E]" />
-                            <span>Chuva Leve (dBZ 15-30)</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="w-3 h-2 rounded bg-[#EAB308]" />
-                            <span>Chuva Moderada (dBZ 30-40)</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="w-3 h-2 rounded bg-[#EF4444]" />
-                            <span>Chuva Forte (dBZ 40-50)</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="w-3 h-2 rounded bg-[#A855F7]" />
-                            <span>Tempestade Severa / Granizo (dBZ &gt; 50)</span>
+                      <div className="px-3 pb-3 pt-1 border-t border-zinc-800/10 dark:border-zinc-800/25 flex flex-col gap-2.5">
+                        
+                        {/* 1. ORIGIN & TRAJECTORY ANALYSIS */}
+                        {(() => {
+                          const origin = getOriginInfo(activeWindDeg);
+                          const destDir = getCompassDirection((activeWindDeg + 180) % 360);
+                          const activeRainMm = daily[activeDayIndex]?.rain_mm || current.rain1h || 0;
+                          const rainPerMin = (activeRainMm / 60).toFixed(3);
+
+                          return (
+                            <div className="p-2.5 rounded-xl bg-black/5 dark:bg-white/5 border border-zinc-800/10 dark:border-zinc-800/20 space-y-2">
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-[10px] font-black uppercase tracking-wider text-[#E2725B] flex items-center gap-1">
+                                  🧭 Trajetória & Origem das Massas
+                                </span>
+                                <span className={`px-1.5 py-0.5 rounded-md font-black text-[8px] uppercase ${origin.badgeBg}`}>
+                                  {origin.emoji} {origin.source}
+                                </span>
+                              </div>
+
+                              <p className="text-[10px] font-bold text-zinc-700 dark:text-zinc-200 leading-tight">
+                                <strong className="text-amber-500 dark:text-amber-400">Origem:</strong> {origin.title}
+                              </p>
+
+                              <p className="text-[9px] font-medium text-zinc-500 dark:text-zinc-400 leading-snug">
+                                {origin.desc}
+                              </p>
+
+                              <div className="text-[9px] font-extrabold bg-[#E2725B]/10 border border-[#E2725B]/20 p-1.5 rounded-lg text-[#E2725B] flex flex-col gap-0.5">
+                                <span>📍 <strong>Deslocamento:</strong> Vindo de <strong>{getCompassDirection(activeWindDeg)}</strong> ({activeWindDeg}°) ➔ indo para <strong>{destDir}</strong> a <strong>{activeWindSpeed} km/h</strong></span>
+                                <span>🌧️ <strong>Taxa Estimada:</strong> {activeRainMm.toFixed(1)} mm/h (~{rainPerMin} mm/min)</span>
+                                <span>📊 <strong>Acumulado Hoje:</strong> {daily[0]?.rain_mm.toFixed(1) || 0} mm</span>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* 2. LEGENDA DE CORES DO RADAR DE CHUVA */}
+                        <div className="space-y-1">
+                          <span className="text-[9px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400 block">
+                            🎨 Legenda de Intensidade de Chuva & Cores (dBZ)
+                          </span>
+                          <div className="flex flex-col gap-1 text-[9px] font-bold">
+                            {/* Ciano / Garoa */}
+                            <div className="flex items-center justify-between p-1 rounded bg-cyan-500/10 border border-cyan-500/20">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-3 h-3 rounded-full bg-[#06B6D4] shrink-0" />
+                                <span className="text-cyan-700 dark:text-cyan-300">Garoa / Chuva Muito Leve</span>
+                              </div>
+                              <span className="text-[8px] font-mono text-zinc-500 dark:text-zinc-400">0.1-1.0 mm/h | &lt;0.02 mm/min | dBZ 10-20</span>
+                            </div>
+
+                            {/* Verde / Chuva Leve */}
+                            <div className="flex items-center justify-between p-1 rounded bg-emerald-500/10 border border-emerald-500/20">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-3 h-3 rounded-full bg-[#22C55E] shrink-0" />
+                                <span className="text-emerald-700 dark:text-emerald-300">Chuva Leve</span>
+                              </div>
+                              <span className="text-[8px] font-mono text-zinc-500 dark:text-zinc-400">1.0-5.0 mm/h | 0.02-0.08 mm/min | dBZ 20-30</span>
+                            </div>
+
+                            {/* Amarelo / Chuva Moderada */}
+                            <div className="flex items-center justify-between p-1 rounded bg-amber-500/10 border border-amber-500/20">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-3 h-3 rounded-full bg-[#EAB308] shrink-0" />
+                                <span className="text-amber-700 dark:text-amber-300">Chuva Moderada</span>
+                              </div>
+                              <span className="text-[8px] font-mono text-zinc-500 dark:text-zinc-400">5.0-15.0 mm/h | 0.08-0.25 mm/min | dBZ 30-40</span>
+                            </div>
+
+                            {/* Vermelho / Chuva Forte */}
+                            <div className="flex items-center justify-between p-1 rounded bg-red-500/10 border border-red-500/20">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-3 h-3 rounded-full bg-[#EF4444] shrink-0" />
+                                <span className="text-red-700 dark:text-red-300">Chuva Forte</span>
+                              </div>
+                              <span className="text-[8px] font-mono text-zinc-500 dark:text-zinc-400">15.0-30.0 mm/h | 0.25-0.50 mm/min | dBZ 40-50</span>
+                            </div>
+
+                            {/* Roxo / Tempestade */}
+                            <div className="flex items-center justify-between p-1 rounded bg-purple-500/10 border border-purple-500/20">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-3 h-3 rounded-full bg-[#A855F7] shrink-0" />
+                                <span className="text-purple-700 dark:text-purple-300">Tempestade Severa / Granizo</span>
+                              </div>
+                              <span className="text-[8px] font-mono text-zinc-500 dark:text-zinc-400">&gt;30.0 mm/h | &gt;0.50 mm/min | dBZ &gt;50</span>
+                            </div>
                           </div>
                         </div>
-                        <div className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400 pt-1.5 border-t border-zinc-800/5 dark:border-zinc-800/15 leading-snug text-justify" style={{ textAlign: "justify" }}>
-                          📌 <span className="font-bold">Interpretação:</span> Mostra núcleos de instabilidade. A animação revela o deslocamento das nuvens de chuva com o vento.
-                        </div>
+
                       </div>
                     )}
                   </div>
