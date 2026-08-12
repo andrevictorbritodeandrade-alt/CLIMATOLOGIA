@@ -94,8 +94,8 @@ export default function WeatherMap({
   // Check if viewing Maricá / RJ coastal zone
   const isCoastalArea = cityName.toLowerCase().includes("maricá") || cityName.toLowerCase().includes("marica") || cityName.toLowerCase().includes("rio de janeiro") || cityName.toLowerCase().includes("niteroi");
 
-  // If in coastal area with active gale alert, boost effective wind representation for particles
-  const displayWindSpeed = isCoastalArea ? Math.max(activeWindSpeed * 1.5, 52) : activeWindSpeed;
+  // Remove artificial inflation of wind speed to ensure particle colors accurately match the real data
+  const displayWindSpeed = activeWindSpeed;
 
   // Beaufort color matching function aligned with Civil Defense stages
   const getBeaufortColor = (speedKmh: number) => {

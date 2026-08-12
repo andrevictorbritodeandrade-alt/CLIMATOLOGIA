@@ -309,15 +309,16 @@ export default function App() {
   };
 
   // Main Weather Loader
-  const fetchWeatherData = async (lat: number, lon: number) => {
+  const fetchWeatherData = async (lat: number, lon: number, isForceRefresh: boolean = false) => {
     setLoadingWeather(true);
     setWeatherError(null);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
 
     try {
-      const response = await fetch(`/api/weather?latitude=${lat}&longitude=${lon}`, { signal: controller.signal });
+      const url = `/api/weather?latitude=${lat}&longitude=${lon}${isForceRefresh ? "&refresh=true&force=true" : ""}`;
+      const response = await fetch(url, { signal: controller.signal });
       clearTimeout(timeoutId);
 
       if (!response.ok) {
@@ -327,7 +328,7 @@ export default function App() {
       const data = await response.json();
 
       if (data && data.current && data.daily && data.hourly) {
-        // Map hourly 384 items first for hour-by-hour matching
+        // Map hourly items
         const hourlyMapped = data.hourly.time.map((time: string, i: number) => ({
           time: new Date(time),
           temp: data.hourly.temperature_2m[i],
@@ -342,74 +343,34 @@ export default function App() {
           weatherCode: data.hourly.weather_code[i],
         }));
 
-        // Find current hour in hourlyMapped
-        const now = new Date();
-        const currentHourIdx = hourlyMapped.findIndex(
-          (h: any) =>
-            h.time.getDate() === now.getDate() &&
-            h.time.getHours() === now.getHours()
-        );
-        const currentHourData = currentHourIdx !== -1 ? hourlyMapped[currentHourIdx] : null;
+        // Real-time current attributes directly from Open-Meteo
+        const cur = data.current;
+        const realTemp = cur.temperature_2m;
+        // Real Feel directly from Open-Meteo apparent_temperature
+        const realFeelsLike = typeof cur.apparent_temperature === "number" ? cur.apparent_temperature : realTemp;
+        const rawCode = typeof cur.weather_code === "number" ? cur.weather_code : (data.hourly.weather_code[0] || 0);
+        const rainAmt = cur.precipitation ?? cur.rain ?? cur.showers ?? 0;
 
-        // Determine effective current weather code & rain
-        let rawCode = data.current.weather_code;
-        let rainAmt = (data.current.precipitation ?? data.current.rain ?? data.current.drizzle ?? 0);
-        if (rainAmt === 0 && currentHourData) {
-          rainAmt = currentHourData.precip;
-        }
+        // Daily Max / Min directly from Open-Meteo daily forecast for today
+        const tempMax = typeof data.daily.temperature_2m_max[0] === "number" ? data.daily.temperature_2m_max[0] : realTemp;
+        const tempMin = typeof data.daily.temperature_2m_min[0] === "number" ? data.daily.temperature_2m_min[0] : realTemp;
 
-        let effectiveCode = rawCode;
-        let precipProb = currentHourData ? currentHourData.precip_prob : 0;
-
-        // If raw code is overcast/cloudy (0, 1, 2, 3), but current hour precipitation > 0 or precipitation probability >= 20% or hourly weather code is rain/drizzle
-        if (currentHourData && (currentHourData.weatherCode >= 50 && currentHourData.weatherCode <= 85)) {
-          effectiveCode = currentHourData.weatherCode;
-        } else if ((rawCode <= 3) && (rainAmt > 0 || precipProb >= 20)) {
-          // Upgrade code to 51 (Garoa Leve / Chuva Leve)
-          effectiveCode = 51;
-        }
-
-        // Compute local today's max/min from today's hourly records
-        const todayHourly = hourlyMapped.filter((h: any) => h.time.getDate() === now.getDate());
-        let localTempMax = data.daily.temperature_2m_max[0];
-        let localTempMin = data.daily.temperature_2m_min[0];
-
-        if (todayHourly.length > 0) {
-          const maxHourlyTemp = Math.max(...todayHourly.map((h: any) => h.temp));
-          const minHourlyTemp = Math.min(...todayHourly.map((h: any) => h.temp));
-          const currentTemp = data.current.temperature_2m;
-          
-          // Filter out raw daily max outliers if they exceed current temp + 5°C on a overcast/drizzle day
-          if (localTempMax > currentTemp + 5 && (effectiveCode === 2 || effectiveCode === 3 || effectiveCode >= 50)) {
-            localTempMax = Math.max(maxHourlyTemp, currentTemp);
-          } else {
-            localTempMax = Math.min(localTempMax, Math.max(maxHourlyTemp, currentTemp));
-          }
-          localTempMin = Math.min(localTempMin, minHourlyTemp);
-        }
-
-        // Bound feels_like to realistic limits
-        let currentFeels = data.current.apparent_temperature;
-        if (effectiveCode >= 50 && currentFeels > data.current.temperature_2m + 2) {
-          currentFeels = data.current.temperature_2m + 1;
-        }
-
-        // Map current with high precision
+        // Map current with high precision directly from live Open-Meteo readings
         const currentMapped = {
-          temp: data.current.temperature_2m,
-          feels_like: currentFeels,
-          humidity: data.current.relative_humidity_2m,
-          pressure: data.current.pressure_msl,
-          temp_max: localTempMax,
-          temp_min: localTempMin,
-          windSpeed: data.current.wind_speed_10m,
-          windGust: data.current.wind_gusts_10m,
-          windDir: getWindDirectionCode(data.current.wind_direction_10m),
-          windDeg: data.current.wind_direction_10m,
+          temp: realTemp,
+          feels_like: realFeelsLike,
+          humidity: cur.relative_humidity_2m ?? 70,
+          pressure: cur.pressure_msl ?? 1013,
+          temp_max: tempMax,
+          temp_min: tempMin,
+          windSpeed: cur.wind_speed_10m ?? 0,
+          windGust: cur.wind_gusts_10m ?? 0,
+          windDir: getWindDirectionCode(cur.wind_direction_10m ?? 0),
+          windDeg: cur.wind_direction_10m ?? 0,
           rain1h: rainAmt,
-          visibility: data.current.visibility || 10000,
-          weatherCode: effectiveCode,
-          description: getWeatherDescription(effectiveCode),
+          visibility: cur.visibility || 10000,
+          weatherCode: rawCode,
+          description: getWeatherDescription(rawCode),
         };
 
         // Map daily 16 days
@@ -438,13 +399,12 @@ export default function App() {
         const currentHour = new Date().getHours();
         setActiveHourIndex(currentHour);
 
-        setLastUpdated(
-          new Date().toLocaleTimeString("pt-BR", {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-          })
-        );
+        const nowStr = new Date().toLocaleTimeString("pt-BR", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        });
+        setLastUpdated(nowStr);
 
         // Cache successful response
         try {
@@ -1212,13 +1172,32 @@ export default function App() {
                 <div className="absolute inset-0 bg-gradient-to-b from-transparent via-white/10 to-white/40 dark:via-[#111111]/10 dark:to-[#111111]/40" />
               </div>
 
-              {/* Highlight Big Temp */}
+              {/* Highlight Big Temp & Real Feel */}
               <div className="relative z-10 md:col-span-1 flex flex-col justify-between border-b md:border-b-0 md:border-r border-[#E7E1D1]/40 dark:border-zinc-800 pb-4 md:pb-0 pr-0 md:pr-4">
                 <div>
-                  <span className="text-xs text-zinc-500 dark:text-zinc-400 font-black uppercase tracking-wider">Clima Atual</span>
-                  <span className="block text-[11px] font-black text-[#E2725B] mt-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className="text-xs text-zinc-500 dark:text-zinc-400 font-black uppercase tracking-wider">
+                        Clima Atual
+                      </span>
+                    </div>
+                    {/* Manual Refresh Button */}
+                    <button
+                      onClick={() => fetchWeatherData(location.latitude, location.longitude, true)}
+                      disabled={loadingWeather}
+                      className="flex items-center gap-1 text-[11px] font-bold text-sky-600 dark:text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 px-2.5 py-1 rounded-full transition-all shrink-0 cursor-pointer disabled:opacity-50"
+                      title="Atualizar dados de clima agora"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${loadingWeather ? "animate-spin text-sky-500" : ""}`} />
+                      <span>{loadingWeather ? "Atualizando..." : "Atualizar"}</span>
+                    </button>
+                  </div>
+
+                  <span className="block text-[11px] font-black text-[#E2725B] mt-1.5">
                     {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).replace(/^\w/, (c) => c.toUpperCase())}
                   </span>
+
                   <div className="flex items-start mt-2">
                     <span className="text-6xl md:text-7xl font-black text-[#1F1B16] dark:text-white leading-none">
                       {Math.round(weather.current.temp)}°
@@ -1226,13 +1205,23 @@ export default function App() {
                     <span className="text-2xl font-black text-[#E2725B] mt-1">C</span>
                   </div>
                 </div>
-                <div className="mt-4">
-                  <span className="text-sm font-black text-[#E2725B] capitalize block leading-tight">
+
+                <div className="mt-4 space-y-2">
+                  <span className="text-sm sm:text-base font-black text-[#E2725B] capitalize block leading-tight">
                     {weather.current.description}
                   </span>
-                  <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 block mt-1">
-                    Sensação Térmica: {Math.round(weather.current.feels_like)}°C
-                  </span>
+
+                  {/* Real Feel / Sensação Térmica Highlight Box */}
+                  <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-800 dark:text-amber-300 text-xs font-black shadow-xs">
+                    <Thermometer className="w-4 h-4 text-amber-500 shrink-0" />
+                    <span>Sensação Térmica: <strong className="text-sm font-extrabold">{weather.current.feels_like.toFixed(1)}°C</strong></span>
+                  </div>
+
+                  {lastUpdated && (
+                    <span className="text-[10px] text-zinc-500 dark:text-zinc-400 block font-semibold pt-0.5">
+                      ⏱️ Atualizado em tempo real às {lastUpdated}
+                    </span>
+                  )}
                 </div>
               </div>
 

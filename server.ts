@@ -38,10 +38,14 @@ app.get("/api/health", (req, res) => {
 
 // Weather Caching Proxy to bypass browser iframe CORS restrictions & shared IP rate-limiting
 const weatherCache = new Map<string, { data: any; timestamp: number }>();
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes cache
+const CACHE_TTL = 1 * 60 * 1000; // 1 minute cache for real-time accuracy
 
 app.get("/api/weather", async (req, res) => {
-  const { latitude, longitude } = req.query;
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+
+  const { latitude, longitude, refresh, force } = req.query;
   if (!latitude || !longitude) {
     return res.status(400).json({ error: "Parâmetros latitude e longitude são obrigatórios." });
   }
@@ -53,16 +57,18 @@ app.get("/api/weather", async (req, res) => {
     return res.status(400).json({ error: "Latitude e longitude devem ser números válidos." });
   }
 
+  const isForceRefresh = refresh === "true" || force === "true";
   const cacheKey = `${lat.toFixed(3)}_${lon.toFixed(3)}`;
   const cached = weatherCache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    console.log(`[Cache Hit] Serving weather for ${cacheKey}`);
+
+  if (!isForceRefresh && cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    console.log(`[Cache Hit] Serving fresh weather for ${cacheKey}`);
     return res.json(cached.data);
   }
 
   const base = "https://api.open-meteo.com/v1/forecast";
   const params = `?latitude=${lat}&longitude=${lon}` +
-    `&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl,precipitation,rain,showers` +
+    `&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl,precipitation,rain,showers` +
     `&hourly=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,pressure_msl,precipitation_probability,precipitation` +
     `&daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,weather_code,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_direction_10m_dominant,wind_gusts_10m_max` +
     `&timezone=auto&forecast_days=16`;
@@ -70,9 +76,9 @@ app.get("/api/weather", async (req, res) => {
   const targetUrl = base + params;
 
   try {
-    console.log(`[Proxy Fetch] Requesting weather from Open-Meteo for ${cacheKey}`);
+    console.log(`[Proxy Fetch] Requesting fresh weather from Open-Meteo for ${cacheKey} (force=${isForceRefresh})`);
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
 
     const response = await fetch(targetUrl, {
       headers: {
