@@ -1128,6 +1128,17 @@ export default function App() {
 
             {/* Quick Metrics */}
             <div className="flex gap-3 sm:gap-4 shrink-0 bg-black/40 backdrop-blur-md px-3 sm:px-4 py-2.5 sm:py-3 rounded-2xl border border-white/10 shadow-lg w-full md:w-auto justify-between md:justify-start">
+              {weather && (
+                <div className="text-center pr-3 sm:pr-4 border-r border-white/15 flex-1 md:flex-none">
+                  <span className="block text-[9px] sm:text-[10px] text-white/70 font-bold uppercase tracking-wider">Clima Atual</span>
+                  <span className="text-xs sm:text-sm font-black text-white flex items-center justify-center gap-1">
+                    {Math.round(weather.current.temp)}°C
+                  </span>
+                  <span className="block text-[8px] sm:text-[9px] font-bold mt-0.5 text-amber-400">
+                    Sensação: {weather.current.feels_like.toFixed(1)}°C
+                  </span>
+                </div>
+              )}
               <div className="text-center pr-3 sm:pr-4 border-r border-white/15 flex-1 md:flex-none">
                 <span className="block text-[9px] sm:text-[10px] text-white/70 font-bold uppercase tracking-wider">Última Att</span>
                 <span className="text-xs sm:text-sm font-black text-[#EAB308]">

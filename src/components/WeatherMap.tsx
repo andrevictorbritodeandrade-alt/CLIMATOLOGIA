@@ -1106,7 +1106,7 @@ export default function WeatherMap({
                     ⏱️ {radarSteps[activeStep30]}
                   </span>
                   <span className="text-[10px] font-extrabold text-zinc-300 truncate">
-                    • 💨 {activeWindSpeed} km/h • {daily[activeDayIndex]?.rain_mm > 0 ? `🌧️ ${daily[activeDayIndex]?.rain_mm}mm` : "☀️ Sem Chuva"}
+                    • 🌡️ {currentStepHourly ? `${Math.round(currentStepHourly.temp)}°C (Sensação ${Math.round(currentStepHourly.feels)}°C)` : `${Math.round(current.temp)}°C`} • 💨 {activeWindSpeed} km/h • {daily[activeDayIndex]?.rain_mm > 0 ? `🌧️ ${daily[activeDayIndex]?.rain_mm}mm` : "☀️ Sem Chuva"}
                   </span>
                 </div>
                 <button
@@ -1149,7 +1149,7 @@ export default function WeatherMap({
                   <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
                     {/* Step label description */}
                     <div className="text-[10px] font-extrabold text-zinc-600 dark:text-zinc-300 bg-black/5 dark:bg-white/5 py-1 px-2.5 rounded-lg border border-zinc-800/5 dark:border-zinc-800/15">
-                      Previsão de {daily[activeDayIndex]?.rain_mm > 0 ? `🌧️ ${daily[activeDayIndex]?.rain_mm} mm` : "☀️ Sem Chuva"} • 💨 {activeWindSpeed} km/h ({getCompassDirection(activeWindDeg)})
+                      {currentStepHourly ? `🌡️ ${Math.round(currentStepHourly.temp)}°C (Sensação: ${Math.round(currentStepHourly.feels)}°C) • ` : ""}Previsão de {daily[activeDayIndex]?.rain_mm > 0 ? `🌧️ ${daily[activeDayIndex]?.rain_mm} mm` : "☀️ Sem Chuva"} • 💨 {activeWindSpeed} km/h ({getCompassDirection(activeWindDeg)})
                     </div>
 
                     {/* Minimize button */}
