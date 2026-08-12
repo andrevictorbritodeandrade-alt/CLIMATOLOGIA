@@ -44,7 +44,8 @@ export interface HourlyForecast {
 
 export interface WeatherData {
   current: CurrentWeather;
-  daily: DailyForecast[];
+  daily: DailyForecast[]; // 16 forecast days (including today)
+  historical: DailyForecast[]; // 7 past days
   hourly: HourlyForecast[];
 }
 

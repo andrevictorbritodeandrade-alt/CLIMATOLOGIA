@@ -33,6 +33,7 @@ import {
   Waves,
   Bot,
   BookOpen,
+  History,
 } from "lucide-react";
 import { FavoriteCity, WeatherData } from "./types";
 import { 
@@ -56,6 +57,7 @@ import WindChart from "./components/WindChart";
 import ForecastTimeline from "./components/ForecastTimeline";
 import ForecastList from "./components/ForecastList";
 import GeminiAssistant from "./components/GeminiAssistant";
+import TemperatureHistoryChart from "./components/TemperatureHistoryChart";
 import BeachSeaCard from "./components/BeachSeaCard";
 import CivilDefenseAlertBanner from "./components/CivilDefenseAlertBanner";
 import CityImpactPanel from "./components/CityImpactPanel";
@@ -125,6 +127,7 @@ export default function App() {
   const [isCityImpactsExpanded, setIsCityImpactsExpanded] = useState(false);
   const [isTimelineExpanded, setIsTimelineExpanded] = useState(false);
   const [isForecastListExpanded, setIsForecastListExpanded] = useState(false);
+  const [isHistoryExpanded, setIsHistoryExpanded] = useState(false);
   const [isWindChartExpanded, setIsWindChartExpanded] = useState(false);
   const [isBeaufortExpanded, setIsBeaufortExpanded] = useState(false);
   const [isBeachSeaExpanded, setIsBeachSeaExpanded] = useState(false);
@@ -328,8 +331,8 @@ export default function App() {
       const data = await response.json();
 
       if (data && data.current && data.daily && data.hourly) {
-        // Map hourly items
-        const hourlyMapped = data.hourly.time.map((time: string, i: number) => ({
+        // Map all hourly items
+        const allHourlyMapped = data.hourly.time.map((time: string, i: number) => ({
           time: new Date(time),
           temp: data.hourly.temperature_2m[i],
           humidity: data.hourly.relative_humidity_2m[i],
@@ -348,12 +351,12 @@ export default function App() {
         const realTemp = cur.temperature_2m;
         // Real Feel directly from Open-Meteo apparent_temperature
         const realFeelsLike = typeof cur.apparent_temperature === "number" ? cur.apparent_temperature : realTemp;
-        const rawCode = typeof cur.weather_code === "number" ? cur.weather_code : (data.hourly.weather_code[0] || 0);
+        const rawCode = typeof cur.weather_code === "number" ? cur.weather_code : (data.hourly.weather_code[7 * 24] || 0); // 7 days * 24h
         const rainAmt = cur.precipitation ?? cur.rain ?? cur.showers ?? 0;
 
-        // Daily Max / Min directly from Open-Meteo daily forecast for today
-        const tempMax = typeof data.daily.temperature_2m_max[0] === "number" ? data.daily.temperature_2m_max[0] : realTemp;
-        const tempMin = typeof data.daily.temperature_2m_min[0] === "number" ? data.daily.temperature_2m_min[0] : realTemp;
+        // Daily Max / Min directly from Open-Meteo daily forecast for today (index 7 since 7 past days)
+        const tempMax = typeof data.daily.temperature_2m_max[7] === "number" ? data.daily.temperature_2m_max[7] : realTemp;
+        const tempMin = typeof data.daily.temperature_2m_min[7] === "number" ? data.daily.temperature_2m_min[7] : realTemp;
 
         // Map current with high precision directly from live Open-Meteo readings
         const currentMapped = {
@@ -373,8 +376,8 @@ export default function App() {
           description: getWeatherDescription(rawCode),
         };
 
-        // Map daily 16 days
-        const dailyMapped = data.daily.time.map((time: string, i: number) => ({
+        // Map all daily 23 days (7 past + 16 forecast)
+        const allDailyMapped = data.daily.time.map((time: string, i: number) => ({
           date: time,
           temp_max: data.daily.temperature_2m_max[i],
           temp_min: data.daily.temperature_2m_min[i],
@@ -387,10 +390,16 @@ export default function App() {
           main_desc: getWeatherDescription(data.daily.weather_code[i]),
         }));
 
+        // Split into historical and forecast
+        const historicalDaily = allDailyMapped.slice(0, 7);
+        const forecastDaily = allDailyMapped.slice(7);
+        const forecastHourly = allHourlyMapped.slice(7 * 24);
+
         const fetchedWeatherData: WeatherData = {
           current: currentMapped,
-          daily: dailyMapped,
-          hourly: hourlyMapped,
+          daily: forecastDaily,
+          historical: historicalDaily,
+          hourly: forecastHourly,
         };
 
         setWeather(fetchedWeatherData);
@@ -1428,6 +1437,51 @@ export default function App() {
                     days={weather.daily}
                     activeDayIndex={activeDayIndex}
                     setActiveDayIndex={setActiveDayIndex}
+                    isDark={isDark}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* HISTORICAL TEMPERATURE CHART (COLLAPSIBLE) */}
+            <div
+              className={`rounded-[24px] sm:rounded-[32px] border transition-all duration-300 shadow-sm overflow-hidden ${
+                isDark ? "bg-[#111111] border-zinc-800" : "bg-white border-[#E7E1D1]"
+              }`}
+            >
+              <button
+                onClick={() => setIsHistoryExpanded((prev) => !prev)}
+                className="w-full p-5 sm:p-6 flex items-center justify-between gap-3 text-left hover:opacity-90 transition-all select-none cursor-pointer"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="p-2.5 rounded-2xl bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 shrink-0">
+                    <History className="w-5 h-5" />
+                  </div>
+                  <div className="truncate">
+                    <h3 className="font-black text-sm sm:text-base text-[#1F1B16] dark:text-white truncate">
+                      Histórico Recente (Últimos 7 dias)
+                    </h3>
+                    <p className="text-[11px] sm:text-xs text-zinc-500 dark:text-zinc-400 font-medium truncate mt-0.5">
+                      Variação das temperaturas máximas e mínimas registradas na região
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-indigo-500 bg-indigo-500/10 px-2.5 py-1 rounded-md hidden md:inline-block">
+                    {isHistoryExpanded ? "Expandido" : "Recolhido"}
+                  </span>
+                  {isHistoryExpanded ? (
+                    <ChevronUp className="w-5 h-5 text-zinc-400" />
+                  ) : (
+                    <ChevronDown className="w-5 h-5 text-zinc-400" />
+                  )}
+                </div>
+              </button>
+
+              {isHistoryExpanded && (
+                <div className="p-5 sm:p-6 pt-0 border-t border-zinc-200/50 dark:border-zinc-800/80 transition-all">
+                  <TemperatureHistoryChart
+                    historicalData={weather.historical}
                     isDark={isDark}
                   />
                 </div>
